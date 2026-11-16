@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import secrets
 import threading
 import time
@@ -20,6 +21,13 @@ from typing import Dict, List, Optional, Tuple
 from ..model import Color, GameType
 from ..tournament import Table, Tournament
 from .ai_player import HeuristicPlayer
+from .record import (
+    default_records_dir,
+    find_record_for_code,
+    list_records,
+    resolve_record_path,
+    save_room_record,
+)
 
 BLACK, WHITE = Color.BLACK, Color.WHITE
 
@@ -27,6 +35,20 @@ BLACK, WHITE = Color.BLACK, Color.WHITE
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LEN = 4
 MAX_ROOMS = 500
+DEFAULT_IDLE_TIMEOUT = 1800.0          # 默认 30 分钟无操作自动关闭
+DEFAULT_SWEEP_INTERVAL = 30.0           # 后台巡检间隔
+
+#: 房间关闭原因 -> 面向棋手的中文提示
+CLOSE_REASON_TEXT = {
+    "manual": "房间已由棋手关闭",
+    "inactivity": "房间因长时间无人操作已自动关闭",
+    "game_over": "对局已结束",
+}
+
+
+def close_reason_text(reason) -> str:
+    """把关闭原因翻译成中文提示。"""
+    return CLOSE_REASON_TEXT.get(str(reason or ""), "房间已关闭")
 
 
 class PlayError(Exception):
@@ -95,6 +117,12 @@ class Room:
     host_token: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     closed: bool = False
+    last_activity: float = field(default_factory=time.monotonic)
+    closed_at: Optional[float] = None
+    closed_reason: str = ""
+    record_path: str = ""
+    record_saved_at: Optional[float] = None
+    record_error: str = ""
     seats: Dict[Color, Optional[Seat]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -191,7 +219,12 @@ class Room:
             "status": self.status,
             "full": self.is_full,
             "closed": self.closed,
+            "closed_at": self.closed_at,
+            "closed_reason": self.closed_reason,
             "created_at": self.created_at,
+            "last_activity": self.last_activity,
+            "record_saved": bool(self.record_path and os.path.isfile(self.record_path)),
+            "record_saved_at": self.record_saved_at,
             "move_number": len(self.referee.rules.moves),
             "free_colors": [c.name for c in self.free_colors()],
             "seats": {c.name: (self.seats[c].to_dict() if self.seats.get(c) else None)
@@ -206,11 +239,40 @@ class Room:
 class RoomManager:
     """对局房间管理：创建 / 加入 / 落子 / 停一手 / 认输。"""
 
-    def __init__(self, tournament: Tournament, ai_player=None):
+    def __init__(self, tournament: Tournament, ai_player=None,
+                 idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+                 records_dir: Optional[str] = None,
+                 auto_sweep: bool = True,
+                 sweep_interval: float = DEFAULT_SWEEP_INTERVAL,
+                 clock=time.monotonic):
         self.tournament = tournament
         self.rooms: Dict[str, Room] = {}
         self._lock = threading.RLock()
         self._ai = ai_player or HeuristicPlayer()
+        self.idle_timeout = max(0.0, float(idle_timeout or 0.0))
+        self.records_dir = os.path.abspath(records_dir or default_records_dir())
+        self._clock = clock
+        self._sweep_interval = max(1.0, float(sweep_interval or DEFAULT_SWEEP_INTERVAL))
+        self._stop = threading.Event()
+        self._reaper: Optional[threading.Thread] = None
+        if auto_sweep and self.idle_timeout > 0:
+            self._reaper = threading.Thread(
+                target=self._reaper_loop, daemon=True, name="smart-arena-reaper")
+            self._reaper.start()
+
+    def touch(self, room: Room) -> None:
+        """记录一次有效活动，用于房间空闲超时判断。"""
+        room.last_activity = self._clock()
+
+    def idle_remaining(self, room: Room) -> Optional[float]:
+        if self.idle_timeout <= 0:
+            return None
+        return max(0.0, self.idle_timeout - (self._clock() - room.last_activity))
+
+    def shutdown(self) -> None:
+        self._stop.set()
+        if self._reaper and self._reaper.is_alive():
+            self._reaper.join(timeout=1.0)
 
     # ------------------------------------------------------------------ 查询
     def get(self, code: Optional[str]) -> Optional[Room]:
@@ -233,7 +295,35 @@ class RoomManager:
     def snapshot(self) -> dict:
         rooms = [r for r in self.rooms.values() if not r.closed]
         rooms.sort(key=lambda r: r.created_at, reverse=True)
-        return {"rooms": [r.brief() for r in rooms]}
+        return {"rooms": [r.brief() for r in rooms],
+                "idle_timeout": self.idle_timeout}
+
+    def records(self, limit: int = 100) -> dict:
+        return {"records": list_records(self.records_dir, limit=limit)}
+
+    def resolve_record(self, name: str) -> str:
+        return resolve_record_path(name, self.records_dir)
+
+    def record_file_path(self, code: str) -> str:
+        room = self.get(code)
+        if room and room.record_path and os.path.isfile(room.record_path):
+            return room.record_path
+        row = find_record_for_code(code, self.records_dir)
+        if row:
+            return resolve_record_path(row.get("name", ""), self.records_dir)
+        return ""
+
+    def sweep_idle(self, now: Optional[float] = None) -> list:
+        """关闭所有超过 idle_timeout 未活动的房间，返回被关闭的房间码。"""
+        if self.idle_timeout <= 0:
+            return []
+        now = self._clock() if now is None else float(now)
+        with self._lock:
+            expired = [r for r in list(self.rooms.values())
+                       if not r.closed and (now - r.last_activity) >= self.idle_timeout]
+        for room in expired:
+            self._close_room(room, reason="inactivity", at=now)
+        return [r.code for r in expired]
 
     def view(self, room: Room, token: Optional[str] = None) -> dict:
         """对弈页视图 = 棋桌公开状态 + 房间座位 + "我是谁"。"""
@@ -258,6 +348,11 @@ class RoomManager:
             "can_move": bool(seat and not seat.is_ai and not room.game_over
                              and to_play is seat.color),
             "seat_tokens": None,        # 永不外泄
+            "idle_timeout": self.idle_timeout,
+            "idle_remaining": self.idle_remaining(room),
+            "closed_reason": room.closed_reason,
+            "record_url": (f"/api/room/{room.code}/record"
+                           if room.record_path and os.path.isfile(room.record_path) else None),
         }
 
     # ------------------------------------------------------------------ 创建 / 加入
@@ -281,6 +376,7 @@ class RoomManager:
                 no, game_type, size=size, black="黑方", white="白方",
                 label=label or f"对局 {code}")
             room = Room(code=code, table=table, mode=mode)
+            self.touch(room)
             self.rooms[code] = room
         seat = room.join(host_color, host_name)
         if mode == "pve":
@@ -294,14 +390,15 @@ class RoomManager:
         room = self.require(code)
         with self._lock:
             seat = room.join(parse_color(color), name)
+        self.touch(room)
         self._publish(room)
         return room, seat
 
-    def close(self, code: str) -> None:
+    def close(self, code: str, reason: str = "manual") -> bool:
         room = self.get(code)
         if room:
-            room.closed = True
-            self.tournament.remove_table(room.no)
+            return self._close_room(room, reason=reason)
+        return False
 
     # ------------------------------------------------------------------ 对弈操作
     def _seat_or_fail(self, room: Room, token: Optional[str]) -> Seat:
@@ -313,6 +410,7 @@ class RoomManager:
     def move(self, code: str, token: str, x: int, y: int) -> dict:
         room = self.require(code)
         seat = self._seat_or_fail(room, token)
+        self.touch(room)
         if room.game_over:
             raise PlayError("本局已结束")
         rules = room.referee.rules
@@ -328,6 +426,7 @@ class RoomManager:
     def pass_turn(self, code: str, token: str) -> dict:
         room = self.require(code)
         seat = self._seat_or_fail(room, token)
+        self.touch(room)
         if room.game_over:
             raise PlayError("本局已结束")
         if room.referee.rules.to_play is not seat.color:
@@ -338,6 +437,7 @@ class RoomManager:
     def resign(self, code: str, token: str) -> dict:
         room = self.require(code)
         seat = self._seat_or_fail(room, token)
+        self.touch(room)
         if room.game_over:
             raise PlayError("本局已结束")
         outcome = room.referee.resign(seat.color)
@@ -359,7 +459,10 @@ class RoomManager:
             if not outcome.accepted:
                 outcome = room.referee.play_pass(seat.color)
         if outcome.accepted:
+            self.touch(room)
             room.table.record_winrate()
+        if room.game_over:
+            self._save_record(room, reason="game_over")
         self._publish(room)
         return {"ai": True, "color": seat.color.name,
                 "point": list(point) if point else None,
@@ -368,7 +471,10 @@ class RoomManager:
     # ------------------------------------------------------------------ 内部
     def _after(self, room: Room, outcome) -> dict:
         if outcome.accepted:
+            self.touch(room)
             room.table.record_winrate()
+        if room.game_over:
+            self._save_record(room, reason="game_over")
         self._publish(room)
         payload = {
             "ok": outcome.accepted,
@@ -390,3 +496,54 @@ class RoomManager:
             "type": "state", "table": room.no, "code": room.code,
             "payload": self.tournament.table_view(room.no), "ts": time.time(),
         })
+
+    # ------------------------------------------------------------------ 保存 / 关闭
+    def _save_record(self, room: Room, reason: str = "",
+                     now: Optional[float] = None) -> str:
+        """把棋局写成 SGF 棋谱并返回路径（幂等：已保存过则直接复用）。"""
+        try:
+            return save_room_record(room, records_dir=self.records_dir,
+                                    reason=reason, now=now) or ""
+        except Exception as exc:                      # pragma: no cover - 兜底
+            room.record_error = str(exc)
+            return ""
+
+    def _publish_closed(self, room: Room) -> None:
+        """广播 room_closed 事件：前端据此提示“房间已关闭 + 下载棋谱”。"""
+        record_url = (f"/api/room/{room.code}/record"
+                      if room.record_path and os.path.isfile(room.record_path) else None)
+        self.tournament.bus.publish({
+            "type": "room_closed", "table": room.no, "code": room.code,
+            "payload": {
+                "code": room.code,
+                "reason": room.closed_reason,
+                "message": close_reason_text(room.closed_reason),
+                "closed_at": room.closed_at,
+                "record_saved": bool(record_url),
+                "record_url": record_url,
+            },
+            "ts": time.time(),
+        })
+
+    def _close_room(self, room: Room, reason: str = "manual",
+                    at: Optional[float] = None) -> bool:
+        """关闭房间：保存棋谱、广播事件、移除棋桌。已关闭则返回 False。"""
+        with self._lock:
+            if room.closed:
+                return False
+            room.closed = True
+            room.closed_reason = reason or "manual"
+            room.closed_at = float(at) if at is not None else time.time()
+        self._save_record(room, reason=room.closed_reason)
+        self._publish_closed(room)
+        with self._lock:
+            self.tournament.remove_table(room.no)
+        return True
+
+    def _reaper_loop(self) -> None:
+        """后台巡检线程：定时关闭空闲超时的房间。"""
+        while not self._stop.wait(self._sweep_interval):
+            try:
+                self.sweep_idle()
+            except Exception:                          # pragma: no cover - 兜底
+                pass

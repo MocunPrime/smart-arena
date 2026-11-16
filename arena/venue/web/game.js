@@ -246,10 +246,26 @@ function showOverlay(v){
     v.first_pass ? ('<p>先停一手（弃权）：' + colorCn(v.first_pass) + '方</p>') : '',
     '<p>犯规 ' + fl + ' 次' +
       (v.foul_counts ? ('（黑 ' + (v.foul_counts.BLACK || 0) + ' / 白 ' + (v.foul_counts.WHITE || 0) + '）') : '') + '</p>',
+    v.record_url ? ('<p><a class="back" href="' + v.record_url + '">下载棋谱（SGF）</a></p>') : '',
     '<p class="muted">点击空白处关闭</p>',
   ];
   el('ov-body').innerHTML = lines.filter(Boolean).join('');
   el('overlay').classList.add('show');
+}
+
+// 房间已关闭（空闲超时 / 手动）：提示并提供棋谱下载
+function showClosed(p){
+  p = p || {};
+  el('ov-title').textContent = (p.reason === 'inactivity') ? '房间已自动关闭' : '房间已关闭';
+  const lines = ['<p>' + (p.message || '房间已关闭。') + '</p>'];
+  lines.push(p.record_url
+    ? ('<p><a class="back" href="' + p.record_url + '">下载棋谱（SGF）</a></p>')
+    : '<p class="muted">本局暂无棋谱文件。</p>');
+  lines.push('<p class="muted">点击空白处关闭</p>');
+  el('ov-body').innerHTML = lines.join('');
+  el('overlay').classList.add('show');
+  const hint = el('hint');
+  if(hint){ hint.textContent = p.message || '房间已关闭'; hint.className = 'hintbar bad'; }
 }
 
 // ---------------------------------------------------------------- 交互
@@ -343,6 +359,7 @@ async function load(){
       return;
     }
     const v = await r.json();
+    if(v && v.closed){ showClosed(v); return; }
     update(v);
   } catch (e) {}
 }
@@ -354,7 +371,8 @@ function connect(tableNo){
   es.onmessage = (e) => {
     try {
       const ev = JSON.parse(e.data);
-      if(ev.type === 'state' && ev.table === tableNo){ load(); }
+      if(ev.type === 'room_closed' && ev.table === tableNo){ showClosed(ev.payload); }
+      else if(ev.type === 'state' && ev.table === tableNo){ load(); }
       else if(ev.type === 'snapshot'){ /* 首帧由 load() 处理 */ }
     } catch (err) {}
   };

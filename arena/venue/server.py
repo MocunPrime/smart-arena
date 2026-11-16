@@ -15,6 +15,8 @@
 * ``/room/<code>``         对弈页（落子 / 停一手 / 认输 / 终局汇总）
 * ``/api/rooms``           房间列表（JSON）
 * ``/api/room/<code>``     房间状态（JSON；带 ``token`` 时含"我是谁 / 能否走子"）
+* ``/api/records``         棋谱存档列表（JSON）
+* ``/api/room/<code>/record``  下载该房间最近保存的 SGF 棋谱（GET）
 * ``/api/room/create``     创建房间（POST）
 * ``/api/room/<code>/join|move|pass|resign``  加入 / 落子 / 停一手 / 认输（POST）
 
@@ -47,7 +49,7 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from ..model import Color, GameType
-from ..play import PlayError, RoomManager, parse_color
+from ..play import PlayError, RoomManager, close_reason_text, parse_color
 from ..study import QuizError, StudyManager
 from ..tournament import EventBus, Tournament
 from .qr import qr_png_data_uri, qr_svg
@@ -96,10 +98,18 @@ def local_ip() -> str:
 
 class VenueServer:
     def __init__(self, tournament: Tournament, host: str = "0.0.0.0", port: int = 8000,
-                 advertised_host: Optional[str] = None):
+                 advertised_host: Optional[str] = None,
+                 idle_timeout: Optional[float] = None,
+                 records_dir: Optional[str] = None):
         self.tournament = tournament
         self.bus: EventBus = tournament.bus
-        self.rooms = RoomManager(tournament)          # 线上对弈房间
+        room_kwargs = {}
+        if idle_timeout is not None:
+            room_kwargs["idle_timeout"] = idle_timeout
+        if records_dir is not None:
+            room_kwargs["records_dir"] = records_dir
+        # 线上对弈房间（默认空闲 30 分钟自动关闭，并自动保存棋谱）
+        self.rooms = RoomManager(tournament, **room_kwargs)
         self.study = StudyManager()                  # 死活题改卷会话
         self.host = host
         self.port = port
@@ -135,6 +145,7 @@ class VenueServer:
         self.httpd.serve_forever()
 
     def shutdown(self) -> None:
+        self.rooms.shutdown()
         if self.httpd:
             self.httpd.shutdown()
             self.httpd.server_close()
@@ -194,6 +205,13 @@ def _make_handler(venue: "VenueServer"):
                 return self._file("game.html")
             if path == "/api/rooms":
                 return self._json(venue.rooms.snapshot())
+            if path == "/api/records":
+                limit = _as_int((qs.get("limit") or ["100"])[0]) or 100
+                return self._json(venue.rooms.records(limit=limit))
+            if path.startswith("/api/records/"):
+                return self._api_record_file(path)
+            if path.startswith("/api/room/") and path.endswith("/record"):
+                return self._api_room_record(path)
             if path.startswith("/api/room/"):
                 return self._api_room_view(path, qs)
             # -------------------------------------------------- 死活题改卷
@@ -302,10 +320,50 @@ def _make_handler(venue: "VenueServer"):
         def _api_room_view(self, path, qs):
             code = path[len("/api/room/"):].strip("/")
             room = venue.rooms.get(code)
-            if room is None or room.closed:
+            if room is None:
                 return self._json({"error": "对局不存在或已关闭"}, 404)
+            if room.closed:
+                record = venue.rooms.record_file_path(code)
+                return self._json({
+                    "code": room.code, "closed": True,
+                    "closed_reason": room.closed_reason,
+                    "message": close_reason_text(room.closed_reason),
+                    "record_url": (f"/api/room/{room.code}/record") if record else None,
+                })
             token = (qs.get("token") or [None])[0]
             return self._json(venue.rooms.view(room, token))
+
+        def _send_sgf(self, fp):
+            """把一份 SGF 棋谱作为附件下载。"""
+            try:
+                with open(fp, "rb") as f:
+                    body = f.read()
+            except OSError:
+                return self._json({"error": "棋谱读取失败"}, 500)
+            name = os.path.basename(fp)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-go-sgf; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _api_room_record(self, path):
+            """下载某房间最近保存的 SGF 棋谱。"""
+            code = path[len("/api/room/"):].rsplit("/", 1)[0].strip("/")
+            fp = venue.rooms.record_file_path(code)
+            if not fp:
+                return self._json({"error": "该对局暂无棋谱"}, 404)
+            return self._send_sgf(fp)
+
+        def _api_record_file(self, path):
+            """按文件名下载棋谱（拒绝路径穿越）。"""
+            name = path[len("/api/records/"):].strip("/")
+            fp = venue.rooms.resolve_record(name)
+            if not fp:
+                return self._json({"error": "棋谱不存在"}, 404)
+            return self._send_sgf(fp)
 
         def _api_room_create(self, data):
             try:
@@ -514,5 +572,9 @@ def _as_int(v):
 
 
 def build_server(tournament: Tournament, host: str = "0.0.0.0", port: int = 8000,
-                 advertised_host: Optional[str] = None) -> VenueServer:
-    return VenueServer(tournament, host=host, port=port, advertised_host=advertised_host)
+                 advertised_host: Optional[str] = None,
+                 idle_timeout: Optional[float] = None,
+                 records_dir: Optional[str] = None) -> VenueServer:
+    return VenueServer(tournament, host=host, port=port,
+                       advertised_host=advertised_host,
+                       idle_timeout=idle_timeout, records_dir=records_dir)

@@ -142,3 +142,48 @@ async function loadRooms(){
 
 loadRooms();
 setInterval(loadRooms, 5000);
+
+// ------------------------------------------------------------------ 棋谱存档
+function fmtTime(ts){
+  if(!ts) return '';
+  const d = new Date(ts * 1000);
+  const p = n => (n < 10 ? '0' : '') + n;
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+    p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function gameCn(g){ return {go:'围棋', gomoku:'五子棋', reversi:'翻转棋'}[g] || '对局'; }
+
+function makeRecordCard(r){
+  const a = document.createElement('a');
+  a.className = 'card';
+  a.href = r.download_url || ('/api/records/' + encodeURIComponent(r.name));
+  a.setAttribute('download', r.name || '');
+  a.innerHTML =
+    '<div class="no">' + (r.code || '----') + ' <span class="badge finished">' +
+      gameCn(r.game_type) + '</span></div>' +
+    '<div class="meta">' + (r.date || '') + ' · ' + fmtTime(r.modified) + '</div>' +
+    '<div class="players"><span>● ' + (r.black || '黑方') + '</span>' +
+      '<span>○ ' + (r.white || '白方') + '</span></div>' +
+    '<div class="meta">结果：' + (r.result || '-') + ' · 点击下载 SGF</div>';
+  return a;
+}
+
+async function loadRecords(){
+  const box = el('records');
+  if(!box) return;
+  try {
+    const r = await fetch('/api/records?limit=24');
+    const d = await r.json();
+    const list = (d && d.records) || [];
+    el('records-count').textContent = list.length ? ('共 ' + list.length + ' 份') : '';
+    box.innerHTML = '';
+    if(!list.length){ box.textContent = '暂无棋谱，对局结束或房间关闭后会自动保存'; return; }
+    list.forEach(rec => box.appendChild(makeRecordCard(rec)));
+  } catch(e) {
+    box.textContent = '棋谱列表加载失败';
+  }
+}
+
+loadRecords();
+setInterval(loadRecords, 10000);

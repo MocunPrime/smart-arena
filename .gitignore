@@ -17,3 +17,4 @@ user-data/
 # 打包中间产物（release 中的 exe 随仓库提交）
 build/
 dist/
+records/

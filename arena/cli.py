@@ -71,8 +71,12 @@ def cmd_serve(args) -> int:
                   if args.tables else Tournament())
     if args.teams:
         _attach_teams(tournament)
+    idle_minutes = getattr(args, "idle_timeout", None)
+    idle_seconds = None if idle_minutes is None else max(0.0, float(idle_minutes)) * 60.0
     venue = VenueServer(tournament, host=args.host, port=args.port,
-                        advertised_host=args.advertised_host)
+                        advertised_host=args.advertised_host,
+                        idle_timeout=idle_seconds,
+                        records_dir=getattr(args, "records_dir", None))
     if args.autoplay:
         _autoplay(tournament, args.interval)
     lobby = venue.base_url + "play"
@@ -82,6 +86,9 @@ def cmd_serve(args) -> int:
     print("  本机地址   :", f"http://127.0.0.1:{args.port}/play")
     if tournament.tables:
         print("  演示棋桌   :", len(tournament.tables), "（智慧赛场见 ISSUE-004）")
+    if venue.rooms.idle_timeout > 0:
+        print("  空闲自动关闭:", int(venue.rooms.idle_timeout // 60), "分钟")
+    print("  棋谱保存目录:", venue.rooms.records_dir)
     print("=" * 54)
     print("  扫码入口（手机连同一 WiFi 后访问）：")
     try:
@@ -160,6 +167,10 @@ def main(argv=None) -> int:
     s.add_argument("--autoplay", action="store_true", help="自动推演(演示用)")
     s.add_argument("--interval", type=float, default=1.2)
     s.add_argument("--teams", action="store_true", help="挂载团队赛制名册")
+    s.add_argument("--idle-timeout", type=float, default=None,
+                   help="房间空闲自动关闭的分钟数（默认 30，0 表示不自动关闭）")
+    s.add_argument("--records-dir", default=None,
+                   help="棋谱保存目录（默认 exe 同级 / 仓库 records）")
     s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser("demo", help="运行裁判/规则演示")

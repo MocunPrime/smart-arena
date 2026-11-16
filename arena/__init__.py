@@ -6,6 +6,6 @@
 本包提供与 Katayzy/GTP 引擎解耦的纯逻辑层，便于论文验证与单元测试。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["model", "rules", "referee", "team", "tournament", "ai", "hardware", "venue"]
