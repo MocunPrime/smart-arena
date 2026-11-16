@@ -37,4 +37,6 @@ def qr_ascii(data: str) -> str:
     if segno is None:
         return "[segno 未安装]"
     q = _make(data)
-    return q.terminal(compact=True)
+    buf = io.StringIO()
+    q.terminal(out=buf, compact=True)
+    return buf.getvalue()

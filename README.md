@@ -43,7 +43,12 @@
 
 ```
 biye/
-├── run.py                     # 一键启动入口： python run.py serve --autoplay
+├── run.py                     # 命令行入口： python run.py serve --autoplay
+├── app.py                     # 桌面入口：双击启动赛场并打开浏览器（exe 打包入口）
+├── SmartArena.spec            # PyInstaller 打包配置
+├── 打包exe.bat                # 一键重新打包
+├── requirements.txt           # 运行依赖（segno）
+├── requirements-build.txt     # 打包依赖（pyinstaller）
 ├── arena/
 │   ├── model.py               # 领域模型：Color / GameType / Move / FoulRecord / Verdict
 │   ├── rules/
@@ -62,8 +67,11 @@ biye/
 │       ├── server.py          # 智慧赛场 HTTP + SSE 服务
 │       ├── qr.py              # 二维码（segno：SVG / PNG / 终端）
 │       └── web/               # 前端：大厅页、单桌页、样式、脚本
-├── tools/mock_gtp_engine.py   # 模拟 GTP 引擎（测试/演示用）
+├── tools/
+│   ├── mock_gtp_engine.py     # 模拟 GTP 引擎（测试/演示用）
+│   └── build_exe.ps1          # 打包脚本
 ├── tests/                     # 单元测试（31 项）
+├── release/                   # 打包产物：SmartArena.exe
 └── docs/                      # 设计文档、需求映射表、开放问题、会议转写
 ```
 
@@ -143,3 +151,25 @@ py -m pip install -r requirements.txt
 - 团队赛权重、阶段划分、限时秒数均可在 `team.py` / `demo_side()` 中调整。
 - **硬件（智慧棋盘）为后续工作**：软件侧已预留标准接口（`arena/hardware.py`），
   待与硬件方案确认后接入，跟踪见 [`docs/OPEN-ISSUES.md`](docs/OPEN-ISSUES.md) **ISSUE-001**。
+
+---
+
+## 九、打包为 exe（单文件）
+
+仓库根目录的 `SmartArena.spec` 已配置好打包，已构建的成品在 **`release\SmartArena.exe`**
+（Windows 64 位单文件，约 11 MB，无需安装 Python）。
+
+- **双击 `SmartArena.exe`**：自动启动演示赛场（3 桌、自动推演）并打开浏览器；
+- **带参数运行**：等价于命令行，例如 `SmartArena.exe serve --tables 5 --teams --autoplay`。
+
+重新打包：
+
+```powershell
+py -m pip install -r requirements.txt -r requirements-build.txt
+py -m PyInstaller --noconfirm --clean --distpath release --workpath build SmartArena.spec
+```
+
+也可以直接双击根目录的 `打包exe.bat`。
+
+> 提示：单文件版首次启动需解压到临时目录，约 2–5 秒；若被 Windows Defender / SmartScreen
+> 拦截，选择“仍要运行”即可。

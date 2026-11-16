@@ -132,7 +132,16 @@ def cmd_selftest(args) -> int:
     return 0 if result.wasSuccessful() else 1
 
 
+def _harden_console() -> None:
+    """让中文/符号在 GBK 控制台或管道重定向下不报错（不可编码字符降级为 ?）。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
 def main(argv=None) -> int:
+    _harden_console()
     p = argparse.ArgumentParser(prog="smart-arena",
                                 description="多棋种赛事规则与智慧赛场（参照 Katayzy）")
     sub = p.add_subparsers(dest="cmd")

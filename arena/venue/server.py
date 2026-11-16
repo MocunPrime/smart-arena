@@ -17,6 +17,7 @@ import json
 import os
 import queue
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,7 +28,17 @@ from ..model import Color, GameType
 from ..tournament import EventBus, Tournament
 from .qr import qr_png_data_uri, qr_svg
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+def _web_dir() -> str:
+    """定位前端静态资源目录（兼容 PyInstaller 冻结后的单文件运行）。"""
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        cand = os.path.join(bundle, "arena", "venue", "web")
+        if os.path.isdir(cand):
+            return cand
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+
+WEB_DIR = _web_dir()
 
 MIME = {
     ".html": "text/html; charset=utf-8",

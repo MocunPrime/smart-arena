@@ -1,0 +1,2 @@
+# 仅打包 exe 时需要（程序运行本身只需要 requirements.txt）
+pyinstaller>=6.11
