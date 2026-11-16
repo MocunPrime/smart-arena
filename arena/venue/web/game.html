@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>线上对弈 · 棋盘</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">对局</h1>
+    <div class="sub">
+      <a href="/play" class="back">← 对弈大厅</a>
+      <span class="badge" id="code">----</span>
+      <span class="badge" id="status">…</span>
+      <span class="muted" id="seat">未落座</span>
+    </div>
+  </header>
+  <main>
+    <div class="boardwrap">
+      <canvas id="board" width="720" height="720"></canvas>
+      <div class="boardfoot" id="boardfoot">　</div>
+    </div>
+
+    <div class="stat">
+      <div class="cell"><div class="k">黑方</div><div class="v sm" id="pblack">--</div></div>
+      <div class="cell"><div class="k">白方</div><div class="v sm" id="pwhite">--</div></div>
+      <div class="cell"><div class="k">手数 / 行棋</div><div class="v" id="mv">--</div></div>
+      <div class="cell"><div class="k">黑方胜率</div><div class="v" id="bwr">--</div></div>
+    </div>
+
+    <section class="panel" id="joinpanel" hidden>
+      <div class="panel-title">加入这盘棋 <span class="muted" id="join-sub"></span></div>
+      <div class="join">
+        <img class="qr" id="roomqr" alt="扫码加入">
+        <div class="join-info">
+          <p>把对局码告诉对手，或让他扫这个二维码：</p>
+          <p class="url big-code" id="roomcode">----</p>
+        </div>
+      </div>
+      <div class="form">
+        <label>昵称 <input id="join-name" maxlength="16" placeholder="你的名字"></label>
+        <label>执子
+          <select id="join-color">
+            <option value="">自动（坐空位）</option>
+            <option value="BLACK">执黑</option>
+            <option value="WHITE">执白</option>
+          </select>
+        </label>
+        <label class="btnrow">&nbsp;<button id="join-btn">落座</button></label>
+      </div>
+      <div class="hintbar" id="join-hint"></div>
+    </section>
+
+    <div class="toolbar" id="toolbar">
+      <button id="passbtn">停一手</button>
+      <button id="passlogbtn">弃权记录</button>
+      <button id="resignbtn" class="danger">认输</button>
+    </div>
+    <div class="hintbar" id="hint">点击棋盘交叉点落子。</div>
+
+    <div class="fouls" id="fouls">暂无犯规</div>
+  </main>
+
+  <div class="overlay" id="overlay">
+    <div class="box">
+      <h2 id="ov-title">终局</h2>
+      <div class="ov-body" id="ov-body"></div>
+      <div class="toolbar">
+        <button id="againbtn">再来一局</button>
+        <button id="backbtn">回大厅</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/static/game.js"></script>
+</body>
+</html>

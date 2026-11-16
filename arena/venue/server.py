@@ -9,7 +9,29 @@
 * ``/qr.svg`` ``/qr.png``  服务地址二维码
 * ``/api/play``       落子（供裁判端/演示 POST）
 
-设计目标：场馆内主机开热点 -> 家长连 WiFi -> 手机浏览，无需外网、无需手机卡。
+线上对弈（本阶段主功能，**始终启用**）：
+
+* ``/play``                对弈大厅（创建 / 按对局码加入）
+* ``/room/<code>``         对弈页（落子 / 停一手 / 认输 / 终局汇总）
+* ``/api/rooms``           房间列表（JSON）
+* ``/api/room/<code>``     房间状态（JSON；带 ``token`` 时含"我是谁 / 能否走子"）
+* ``/api/room/create``     创建房间（POST）
+* ``/api/room/<code>/join|move|pass|resign``  加入 / 落子 / 停一手 / 认输（POST）
+
+死活题改卷（会议："软件要有改卷功能"，本阶段主功能之一，**始终启用**）：
+
+* ``/study``                     改卷页（按难度选死活题来做）
+* ``/api/study/problems``        题库列表（JSON，不含解答）
+* ``/api/study/<sid>``           单次做题会话状态（JSON）
+* ``/api/study/start``           开始一题（POST ``{id, streak_needed?, threshold?}``）
+* ``/api/study/<sid>/move``      人类落子（POST ``{x, y}``，返回本手胜率/是否连对）
+* ``/api/study/<sid>/reset``     重做本题（POST）
+
+"智慧赛场"（场馆观赛、多桌导播）按会议阶段性安排**暂时关闭**，由 ``VENUE_ENABLED``
+统一控制，详见 ``docs/OPEN-ISSUES.md`` ISSUE-004。
+
+设计目标：同一台主机开热点 -> 棋手手机/电脑连上即可对弈；家长在同一局域网内
+扫码观赛（该部分见 ISSUE-004），无需外网、无需手机卡。
 """
 from __future__ import annotations
 
@@ -25,6 +47,8 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from ..model import Color, GameType
+from ..play import PlayError, RoomManager, parse_color
+from ..study import QuizError, StudyManager
 from ..tournament import EventBus, Tournament
 from .qr import qr_png_data_uri, qr_svg
 
@@ -39,6 +63,14 @@ def _web_dir() -> str:
 
 
 WEB_DIR = _web_dir()
+
+# ---------------------------------------------------------------------------
+# "智慧赛场"（场馆观赛 / 多桌导播）总开关。
+#
+# 会议约定：本阶段先把"线上对弈"做完整，场馆观赛部分暂缓启用，因此这里整体
+# 关闭（代码与页面全部保留，等 ISSUE-004 验收后把下面一行改成 True 即可恢复）。
+# ---------------------------------------------------------------------------
+VENUE_ENABLED = False          # <- 待 docs/OPEN-ISSUES.md ISSUE-004 完成后置为 True
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -67,6 +99,8 @@ class VenueServer:
                  advertised_host: Optional[str] = None):
         self.tournament = tournament
         self.bus: EventBus = tournament.bus
+        self.rooms = RoomManager(tournament)          # 线上对弈房间
+        self.study = StudyManager()                  # 死活题改卷会话
         self.host = host
         self.port = port
         self.advertised_host = advertised_host
@@ -153,15 +187,39 @@ def _make_handler(venue: "VenueServer"):
         def do_GET(self):
             parsed = urlparse(self.path)
             path, qs = parsed.path, parse_qs(parsed.query)
+            # -------------------------------------------------- 线上对弈（始终启用）
+            if path == "/play":
+                return self._file("play.html")
+            if path.startswith("/room/"):
+                return self._file("game.html")
+            if path == "/api/rooms":
+                return self._json(venue.rooms.snapshot())
+            if path.startswith("/api/room/"):
+                return self._api_room_view(path, qs)
+            # -------------------------------------------------- 死活题改卷
+            if path == "/study":
+                return self._file("study.html")
+            if path == "/api/study/problems":
+                return self._json(venue.study.list_problems())
+            if path.startswith("/api/study/"):
+                return self._api_study_view(path)
             if path in ("/", "/index.html"):
-                return self._file("index.html")
+                # 智慧赛场关闭时，首页即对弈大厅
+                return self._file("index.html" if VENUE_ENABLED else "play.html")
+            # ---------------------------------------- 智慧赛场（场馆观赛，暂时关闭）
             if path.startswith("/table/"):
+                if not VENUE_ENABLED:
+                    return self._venue_disabled()
                 return self._file("table.html")
             if path == "/healthz":
                 return self._json({"ok": True, "time": time.time()})
             if path == "/api/tables":
+                if not VENUE_ENABLED:
+                    return self._venue_disabled()
                 return self._json(venue.tournament.snapshot())
             if path.startswith("/api/table/"):
+                if not VENUE_ENABLED:
+                    return self._venue_disabled()
                 no = _as_int(path.rsplit("/", 1)[-1])
                 view = venue.tournament.table_view(no) if no is not None else None
                 return self._json(view or {"error": "no such table"}, 200 if view else 404)
@@ -192,6 +250,14 @@ def _make_handler(venue: "VenueServer"):
             except Exception:
                 return self._json({"error": "bad json"}, 400)
             path = urlparse(self.path).path
+            if path == "/api/room/create":
+                return self._api_room_create(data)
+            if path.startswith("/api/room/"):
+                return self._api_room_action(path, data)
+            if path == "/api/study/start":
+                return self._api_study_start(data)
+            if path.startswith("/api/study/"):
+                return self._api_study_action(path, data)
             if path == "/api/play":
                 return self._api_play(data)
             if path == "/api/newtable":
@@ -223,6 +289,131 @@ def _make_handler(venue: "VenueServer"):
                 black=data.get("black", "黑方"), white=data.get("white", "白方"),
                 label=data.get("label", ""))
             return self._json(t.brief(), 201)
+
+        # ---------------------------------------------------------- 线上对弈 API
+        def _venue_disabled(self):
+            return self._json({
+                "error": "智慧赛场（场馆观赛）已按阶段安排暂停启用",
+                "hint": "见 docs/OPEN-ISSUES.md ISSUE-004；"
+                        "启用请把 arena/venue/server.py 的 VENUE_ENABLED 置为 True",
+                "play": "/play",
+            }, 503)
+
+        def _api_room_view(self, path, qs):
+            code = path[len("/api/room/"):].strip("/")
+            room = venue.rooms.get(code)
+            if room is None or room.closed:
+                return self._json({"error": "对局不存在或已关闭"}, 404)
+            token = (qs.get("token") or [None])[0]
+            return self._json(venue.rooms.view(room, token))
+
+        def _api_room_create(self, data):
+            try:
+                game_type = GameType(data.get("game_type") or "go")
+            except ValueError:
+                return self._json({"error": f"未知棋种 {data.get('game_type')}"}, 400)
+            mode = (data.get("mode") or "pvp").lower()
+            host_color = parse_color(data.get("color")) or Color.BLACK
+            size = data.get("size")
+            try:
+                size = int(size) if size else None
+            except (TypeError, ValueError):
+                size = None
+            kwargs = {}
+            if game_type is GameType.GOMOKU and "forbidden" in data:
+                kwargs["forbidden"] = bool(data.get("forbidden"))
+            try:
+                room, seat = venue.rooms.create(
+                    game_type, size=size, mode=mode,
+                    host_name=(data.get("name") or "玩家"),
+                    host_color=host_color,
+                    label=data.get("label", ""),
+                    **kwargs)
+            except PlayError as exc:
+                return self._json({"error": str(exc)}, 400)
+            return self._json({
+                "ok": True, "code": room.code, "table": room.no,
+                "url": f"/room/{room.code}",
+                "seat": seat.to_dict(with_token=True),
+                "room": room.to_dict(),
+                "view": venue.rooms.view(room, seat.token),
+            }, 201)
+
+        def _api_room_action(self, path, data):
+            parts = [q for q in path.split("/") if q]      # api/room/<code>/<action>
+            if len(parts) < 3 or parts[:2] != ["api", "room"]:
+                return self._json({"error": "not found", "path": path}, 404)
+            code = parts[2]
+            action = parts[3] if len(parts) > 3 else ""
+            try:
+                room = venue.rooms.require(code)
+            except PlayError as exc:
+                return self._json({"error": str(exc)}, 404)
+            token = data.get("token") or ""
+            try:
+                if action == "join":
+                    room, seat = venue.rooms.join(code, data.get("name", ""),
+                                                  data.get("color"))
+                    return self._json({
+                        "ok": True, "code": room.code, "table": room.no,
+                        "url": f"/room/{room.code}",
+                        "seat": seat.to_dict(with_token=True),
+                        "room": room.to_dict(),
+                        "view": venue.rooms.view(room, seat.token),
+                    })
+                if action == "move":
+                    result = venue.rooms.move(code, token,
+                                              int(data.get("x")), int(data.get("y")))
+                elif action == "pass":
+                    result = venue.rooms.pass_turn(code, token)
+                elif action == "resign":
+                    result = venue.rooms.resign(code, token)
+                else:
+                    return self._json({"error": f"未知操作 {action}"}, 404)
+            except PlayError as exc:
+                return self._json({"error": str(exc)}, 400)
+            except (TypeError, ValueError):
+                return self._json({"error": "参数不完整"}, 400)
+            return self._json(result)
+
+        # ---------------------------------------------------------- 死活题改卷 API
+        def _api_study_view(self, path):
+            sid = path[len("/api/study/"):].strip("/")
+            try:
+                return self._json(venue.study.get(sid).to_dict())
+            except QuizError as exc:
+                return self._json({"error": str(exc)}, 404)
+
+        def _api_study_start(self, data):
+            pid = data.get("id") or data.get("problem")
+            try:
+                streak = data.get("streak_needed")
+                streak = int(streak) if streak else None
+                threshold = float(data.get("threshold") or 0.90)
+                session = venue.study.start(
+                    pid, streak_needed=streak, threshold=threshold)
+            except QuizError as exc:
+                return self._json({"error": str(exc)}, 400)
+            except (TypeError, ValueError):
+                return self._json({"error": "参数不合法"}, 400)
+            return self._json(session.to_dict(), 201)
+
+        def _api_study_action(self, path, data):
+            parts = [q for q in path.split("/") if q]   # api/study/<sid>/<action>
+            if len(parts) < 3 or parts[:2] != ["api", "study"]:
+                return self._json({"error": "not found", "path": path}, 404)
+            sid = parts[2]
+            action = parts[3] if len(parts) > 3 else ""
+            try:
+                if action == "move":
+                    return self._json(venue.study.move(sid, data.get("x"), data.get("y")))
+                if action == "reset":
+                    return self._json(venue.study.reset(sid))
+            except QuizError as exc:
+                return self._json({"error": str(exc)}, 400)
+            except (TypeError, ValueError):
+                return self._json({"error": "参数不完整"}, 400)
+            return self._json({"error": f"未知操作 {action}"}, 404)
 
         def _publish_state(self, no):
             t = venue.tournament.get(no)

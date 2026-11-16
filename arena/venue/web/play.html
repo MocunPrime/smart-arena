@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>线上对弈 · 大厅</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>线上对弈 · 大厅</h1>
+    <div class="sub">围棋 / 五子棋 / 翻转棋 · 创建房间或输入 4 位对局码加入 · 同一局域网即可，无需外网<br>
+      <a class="back" href="/study">死活题改卷 →</a>
+      <span class="muted">（人做死活题，软件按胜率改卷）</span>
+    </div>
+  </header>
+  <main>
+    <section class="join">
+      <img class="qr" src="{{QR_DATA_URI}}" alt="扫码进入">
+      <div class="join-info">
+        <p>同一 WiFi / 热点下，对方用手机或电脑访问：</p>
+        <p class="url">{{BASE_URL}}</p>
+        <p class="hint">本机自测：<a class="back" href="/play">/play</a> · 页面上会显示 4 位对局码，报给对手即可</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">创建对局 <span class="muted">先落座，再把对局码发给对手</span></div>
+      <div class="form">
+        <label>棋种
+          <select id="f-game">
+            <option value="go">围棋</option>
+            <option value="gomoku">五子棋</option>
+            <option value="reversi">翻转棋</option>
+          </select>
+        </label>
+        <label>棋盘
+          <select id="f-size"></select>
+        </label>
+        <label>对手
+          <select id="f-mode">
+            <option value="pvp">玩家对战（真人）</option>
+            <option value="pve">人机对战（AI）</option>
+          </select>
+        </label>
+        <label>我的执子
+          <select id="f-color">
+            <option value="BLACK">执黑（先手）</option>
+            <option value="WHITE">执白（后手）</option>
+          </select>
+        </label>
+        <label>昵称
+          <input id="f-name" maxlength="16" placeholder="你的名字">
+        </label>
+        <label class="btnrow">&nbsp;
+          <button id="create-btn">创建房间</button>
+        </label>
+      </div>
+      <div class="hintbar" id="create-hint">创建后会生成 4 位对局码，把它发给对手即可。</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">加入对局 <span class="muted">输入对手给你的对局码</span></div>
+      <div class="form">
+        <label>对局码
+          <input id="j-code" maxlength="4" class="codeinput" placeholder="例如 7KQ2">
+        </label>
+        <label>昵称
+          <input id="j-name" maxlength="16" placeholder="你的名字">
+        </label>
+        <label>执子
+          <select id="j-color">
+            <option value="">自动（坐空位）</option>
+            <option value="BLACK">执黑</option>
+            <option value="WHITE">执白</option>
+          </select>
+        </label>
+        <label class="btnrow">&nbsp;
+          <button id="join-btn">加入房间</button>
+        </label>
+      </div>
+      <div class="hintbar" id="join-hint"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">进行中的对局 <span class="muted" id="rooms-count"></span></div>
+      <div id="rooms" class="grid">加载中…</div>
+    </section>
+  </main>
+  <script src="/static/play.js"></script>
+</body>
+</html>

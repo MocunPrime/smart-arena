@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>死活题改卷 · 线上对弈</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>死活题改卷</h1>
+    <div class="sub">
+      <a href="/play" class="back">← 对弈大厅</a>
+      <span class="badge" id="difficulty">--</span>
+      <span class="muted" id="goal">做死活题，软件按胜率改卷：连续走对即判做对</span>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <div class="panel-title">选择题 <span class="muted">不同难度 · 内置经典死活常型</span></div>
+      <div class="form">
+        <label>难度
+          <select id="f-difficulty"><option value="">全部难度</option></select>
+        </label>
+        <label>题目
+          <select id="f-problem"></select>
+        </label>
+        <label class="btnrow">&nbsp;
+          <button id="start-btn">开始做题</button>
+        </label>
+      </div>
+      <div class="hintbar" id="pick-hint">选好题目后点“开始做题”。</div>
+    </section>
+
+    <div class="boardwrap">
+      <canvas id="board" width="560" height="560"></canvas>
+      <div class="boardfoot" id="boardfoot">　</div>
+    </div>
+
+    <div class="stat">
+      <div class="cell"><div class="k">难度 / 题名</div><div class="v sm" id="s-name">--</div></div>
+      <div class="cell"><div class="k">连续做对</div><div class="v" id="s-streak">0 / 0</div></div>
+      <div class="cell"><div class="k">本手胜率</div><div class="v" id="s-winrate">--</div></div>
+      <div class="cell"><div class="k">做错次数</div><div class="v" id="s-wrong">0</div></div>
+    </div>
+
+    <div class="hintbar" id="hint">请先在上方选择题目并“开始做题”。</div>
+    <div class="toolbar" id="toolbar">
+      <button id="hintbtn">提示</button>
+      <button id="resetbtn">重做本题</button>
+    </div>
+
+    <section class="panel" id="historypanel" hidden>
+      <div class="panel-title">本次记录 <span class="muted" id="hist-count"></span></div>
+      <div class="fouls" id="history">暂无记录</div>
+    </section>
+  </main>
+
+  <div class="overlay" id="overlay">
+    <div class="box">
+      <h2 id="ov-title">改卷结果</h2>
+      <div class="ov-body" id="ov-body"></div>
+      <div class="toolbar">
+        <button id="againbtn">再做一题</button>
+        <button id="resetbtn2">重做本题</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/static/study.js"></script>
+</body>
+</html>

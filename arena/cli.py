@@ -66,22 +66,26 @@ def _autoplay(t: Tournament, interval: float = 1.2):
 
 
 def cmd_serve(args) -> int:
-    tournament = build_demo_tournament(args.tables, args.engine)
+    # 本阶段主打"线上对弈"：默认不预置演示棋桌；需要观赛演示时传 --tables N。
+    tournament = (build_demo_tournament(args.tables, args.engine)
+                  if args.tables else Tournament())
     if args.teams:
         _attach_teams(tournament)
     venue = VenueServer(tournament, host=args.host, port=args.port,
                         advertised_host=args.advertised_host)
     if args.autoplay:
         _autoplay(tournament, args.interval)
+    lobby = venue.base_url + "play"
     print("=" * 54)
-    print("  智慧赛场已启动")
-    print("  局域网地址 :", venue.base_url)
-    print("  本机地址   :", f"http://127.0.0.1:{args.port}/")
-    print("  棋桌数量   :", len(tournament.tables))
+    print("  线上对弈已启动")
+    print("  对弈大厅   :", lobby)
+    print("  本机地址   :", f"http://127.0.0.1:{args.port}/play")
+    if tournament.tables:
+        print("  演示棋桌   :", len(tournament.tables), "（智慧赛场见 ISSUE-004）")
     print("=" * 54)
     print("  扫码入口（手机连同一 WiFi 后访问）：")
     try:
-        print(qr_ascii(venue.base_url))
+        print(qr_ascii(lobby))
     except Exception:
         pass
     print("  Ctrl+C 退出")
@@ -149,7 +153,8 @@ def main(argv=None) -> int:
     s = sub.add_parser("serve", help="启动智慧赛场局域网服务")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--tables", type=int, default=3, help="演示棋桌数量(1-5)")
+    s.add_argument("--tables", type=int, default=0,
+                   help="预置演示棋桌数量(0-5，默认 0=纯对弈大厅)")
     s.add_argument("--engine", default=None, help="KataGo 可执行文件路径")
     s.add_argument("--advertised-host", default=None)
     s.add_argument("--autoplay", action="store_true", help="自动推演(演示用)")

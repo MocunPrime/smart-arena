@@ -68,6 +68,9 @@ class Referee:
         self.time_control = time_control or TimeControl()
         self.fouls: List[FoulRecord] = []
         self.pass_order: List[Color] = []
+        #: 弃权（停一手）明细：谁、在第几手、紧跟在谁的哪一手之后
+        self.pass_log: List[dict] = []
+        self.resign_color: Optional[Color] = None
         self._final: Optional[Verdict] = None
         self.started_at = time.time()
         self._events_sink = events_sink
@@ -115,10 +118,28 @@ class Referee:
         self.tick()
         result = self.rules.play_pass(color)
         if result is MoveResult.OK:
+            record = self._pass_record(color)
+            self.pass_log.append(record)
             self.pass_order.append(color)
             self._emit("pass", {"color": color.name,
-                                "first_pass": self.pass_order[0].name})
+                                "first_pass": self.pass_order[0].name,
+                                "record": record})
         return self._wrap(color, result, None, None)
+
+    def _pass_record(self, color: Color) -> dict:
+        """记录这次弃权"是在谁的哪一手之后"发生的（供弃权查询）。"""
+        moves = self.rules.moves
+        pass_move = moves[-1] if moves else None          # play_pass 已把本手追加进 moves
+        prev = moves[-2] if len(moves) >= 2 else None
+        return {
+            "order": len(self.pass_log) + 1,
+            "color": color.name,
+            "color_cn": color.name_cn,
+            "move_no": pass_move.move_no if pass_move else len(moves),
+            "after_move_no": prev.move_no if prev else None,
+            "after_color": prev.color.name if prev else None,
+            "after_color_cn": prev.color.name_cn if prev else None,
+        }
 
     def _wrap(self, color: Color, result: MoveResult,
               x: Optional[int], y: Optional[int]) -> PlayOutcome:
@@ -156,6 +177,22 @@ class Referee:
     def foul_count(self, color: Color) -> int:
         return sum(1 for f in self.fouls if f.color is color)
 
+    # ------------------------------------------------------------------ 认输
+    def resign(self, color: Color) -> PlayOutcome:
+        """认输：对方获胜。
+
+        会议要求终局汇总里能说明"谁先放弃 / 谁认输"，因此把认输方记进
+        ``resign_color``，由 :meth:`summary` 一并输出。
+        """
+        if self.game_over:
+            return PlayOutcome(result=MoveResult.GAME_OVER, accepted=False)
+        self.resign_color = color
+        self._final = Verdict.WHITE_WIN if color is BLACK else Verdict.BLACK_WIN
+        self.rules.game_over = True
+        self._emit("verdict", {"verdict": self._final.value, "reason": "resign",
+                               "resigned": color.name})
+        return PlayOutcome(result=MoveResult.OK, accepted=True)
+
     # ------------------------------------------------------------------ 状态
     def verdict(self) -> Verdict:
         return self._final if self._final is not None else self.rules.verdict()
@@ -175,7 +212,9 @@ class Referee:
             "move_number": len(self.rules.moves),
             "last_move": self.rules.last_move.to_dict() if self.rules.last_move else None,
             "first_pass": self.pass_order[0].name if self.pass_order else None,
+            "resigned": self.resign_color.name if self.resign_color else None,
             "pass_order": [c.name for c in self.pass_order],
+            "pass_log": [dict(r) for r in self.pass_log],
             "fouls": [f.to_dict() for f in self.fouls],
             "foul_counts": {BLACK.name: self.foul_count(BLACK),
                             WHITE.name: self.foul_count(WHITE)},
@@ -192,6 +231,8 @@ class Referee:
             "foul_counts": {BLACK.name: self.foul_count(BLACK),
                             WHITE.name: self.foul_count(WHITE)},
             "first_pass": self.pass_order[0].name if self.pass_order else None,
+            "pass_log": [dict(r) for r in self.pass_log],
+            "resigned": self.resign_color.name if self.resign_color else None,
             "clock": {c.name: round(self.clock.get(c, 0.0), 1) for c in (BLACK, WHITE)},
             "game_over": self.game_over,
         }

@@ -15,6 +15,7 @@ from arena.referee import Referee, TimeControl  # noqa: E402
 from arena.rules import create_rules  # noqa: E402
 from arena.team import VotingSession, demo_side  # noqa: E402
 from arena.tournament import Tournament  # noqa: E402
+import arena.venue.server as venue_server  # noqa: E402
 from arena.venue.server import VenueServer  # noqa: E402
 
 BLACK, WHITE = Color.BLACK, Color.WHITE
@@ -86,6 +87,9 @@ class TeamVotingTest(unittest.TestCase):
 class TournamentVenueTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # 本阶段智慧赛场默认停用，这里显式打开以验证其内部逻辑仍完好。
+        cls._venue_flag = venue_server.VENUE_ENABLED
+        venue_server.VENUE_ENABLED = True
         cls.t = Tournament()
         cls.t.create_table(1, GameType.GO, size=9, label="围棋A")
         cls.t.create_table(2, GameType.GOMOKU, size=15, label="五子棋A")
@@ -101,6 +105,7 @@ class TournamentVenueTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.venue.shutdown()
+        venue_server.VENUE_ENABLED = cls._venue_flag
 
     def _get(self, path):
         with urllib.request.urlopen(self.base + path, timeout=5) as r:

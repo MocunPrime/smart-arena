@@ -85,3 +85,31 @@ button:active{background:var(--accent)}
   padding:20px;max-width:380px;width:100%}
 .overlay h2{margin:0 0 12px}
 .ov-body p{margin:6px 0;font-size:14px;color:var(--txt)}
+/* ---- 线上对弈：表单 / 提示 / 弹层 ---- */
+.form{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px}
+.form label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.form input,.form select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:10px;padding:9px 10px;font-size:14px;width:100%}
+.form input:focus,.form select:focus{outline:none;border-color:var(--accent)}
+.form label.btnrow{justify-content:flex-end}
+.codeinput{letter-spacing:6px;font-size:20px;font-weight:700;text-transform:uppercase;text-align:center}
+.big-code{font-size:34px;font-weight:800;letter-spacing:8px;color:var(--accent)}
+.hintbar.ok{color:var(--win)}
+.hintbar.bad{color:var(--lose)}
+button.danger{border-color:#5a2830;color:#ffd7d7;background:#3a1c22}
+button.danger:active{background:var(--lose)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.badge.ready{color:var(--accent);border-color:var(--accent)}
+.muted.ok{color:var(--win)}
+.foulbig{font-size:16px;font-weight:700;color:var(--warn)}
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);background:var(--panel2);
+  border:1px solid var(--line);color:var(--txt);padding:10px 16px;border-radius:10px;font-size:14px;
+  opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:80vw;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:var(--lose)}
+.toast.ok{border-color:var(--win)}
+@media(max-width:720px){
+  .form{grid-template-columns:1fr}
+  .join{flex-direction:column;align-items:flex-start}
+  .big-code{font-size:26px;letter-spacing:4px}
+}

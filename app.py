@@ -1,7 +1,7 @@
 """桌面入口（打包为 exe 后双击即可运行）。
 
 用法：
-* 不带参数运行（双击 exe）-> 启动演示赛场（3 桌，自动推演），并自动打开浏览器；
+* 不带参数运行（双击 exe）-> 启动线上对弈服务并自动打开浏览器（对弈大厅 /play）；
 * 带命令行参数运行        -> 等价于 ``python run.py <参数>``（serve / demo / test）。
 """
 from __future__ import annotations
@@ -22,13 +22,13 @@ def _open_browser_later(url: str, delay: float = 1.5) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def _run_desktop(tables: int = 3, port: int = 8000) -> int:
-    from arena.cli import _attach_teams, _autoplay, build_demo_tournament
+def _run_desktop(port: int = 8000) -> int:
+    from arena.tournament import Tournament
     from arena.venue.qr import qr_ascii
     from arena.venue.server import VenueServer
 
-    tournament = build_demo_tournament(tables)
-    _attach_teams(tournament)
+    # 本阶段主打"线上对弈"：不再默认推演演示赛场（智慧赛场见 ISSUE-004）。
+    tournament = Tournament()
 
     venue = VenueServer(tournament, host="0.0.0.0", port=port)
     try:
@@ -37,19 +37,20 @@ def _run_desktop(tables: int = 3, port: int = 8000) -> int:
         venue = VenueServer(tournament, host="0.0.0.0", port=0)
         venue.build()
 
-    _autoplay(tournament, 1.2)
-
-    local_url = f"http://127.0.0.1:{venue.port}/"
+    local_url = f"http://127.0.0.1:{venue.port}/play"
     bar = "=" * 56
     print(bar)
-    print("  智慧赛场已启动（演示模式）")
-    print("  本机地址   :", local_url)
-    print("  局域网地址 :", venue.base_url)
-    print("  棋桌数量   :", len(tournament.tables))
+    print("  线上对弈已启动")
+    print("  对弈大厅   :", local_url)
+    print("  局域网大厅 :", venue.base_url + "play")
+    print("  玩法       : 创建房间 -> 记住 4 位对局码 -> 报给对手扫码或输入")
+    print("  支持棋种   : 围棋 / 五子棋 / 翻转棋（人人对战、人机对战）")
+    print("  死活题改卷 :", f"http://127.0.0.1:{venue.port}/study",
+          "（人做死活题，软件按胜率改卷）")
     print(bar)
     print("  正在自动打开浏览器；关闭本窗口即停止服务（Ctrl+C）")
     try:
-        print(qr_ascii(venue.base_url))
+        print(qr_ascii(venue.base_url + "play"))
     except Exception:
         pass
 
