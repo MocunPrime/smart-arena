@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from ..model import Color, GameType
+from ..referee import TimeControl
 from ..tournament import Table, Tournament
 from .ai_player import HeuristicPlayer
 from .record import (
@@ -37,6 +38,7 @@ CODE_LEN = 4
 MAX_ROOMS = 500
 DEFAULT_IDLE_TIMEOUT = 1800.0          # 默认 30 分钟无操作自动关闭
 DEFAULT_SWEEP_INTERVAL = 30.0           # 后台巡检间隔
+DEFAULT_TICK_INTERVAL = 1.0             # 计时巡检间隔（检查每手/总用时超时）
 
 #: 房间关闭原因 -> 面向棋手的中文提示
 CLOSE_REASON_TEXT = {
@@ -244,6 +246,8 @@ class RoomManager:
                  records_dir: Optional[str] = None,
                  auto_sweep: bool = True,
                  sweep_interval: float = DEFAULT_SWEEP_INTERVAL,
+                 time_control: Optional[TimeControl] = None,
+                 tick_interval: float = DEFAULT_TICK_INTERVAL,
                  clock=time.monotonic):
         self.tournament = tournament
         self.rooms: Dict[str, Room] = {}
@@ -252,13 +256,20 @@ class RoomManager:
         self.idle_timeout = max(0.0, float(idle_timeout or 0.0))
         self.records_dir = os.path.abspath(records_dir or default_records_dir())
         self._clock = clock
+        self.time_control = time_control
         self._sweep_interval = max(1.0, float(sweep_interval or DEFAULT_SWEEP_INTERVAL))
+        self._tick_interval = max(0.2, float(tick_interval or DEFAULT_TICK_INTERVAL))
         self._stop = threading.Event()
         self._reaper: Optional[threading.Thread] = None
+        self._ticker: Optional[threading.Thread] = None
         if auto_sweep and self.idle_timeout > 0:
             self._reaper = threading.Thread(
                 target=self._reaper_loop, daemon=True, name="smart-arena-reaper")
             self._reaper.start()
+        if auto_sweep:
+            self._ticker = threading.Thread(
+                target=self._ticker_loop, daemon=True, name="smart-arena-clock")
+            self._ticker.start()
 
     def touch(self, room: Room) -> None:
         """记录一次有效活动，用于房间空闲超时判断。"""
@@ -271,8 +282,9 @@ class RoomManager:
 
     def shutdown(self) -> None:
         self._stop.set()
-        if self._reaper and self._reaper.is_alive():
-            self._reaper.join(timeout=1.0)
+        for th in (self._reaper, self._ticker):
+            if th and th.is_alive():
+                th.join(timeout=1.0)
 
     # ------------------------------------------------------------------ 查询
     def get(self, code: Optional[str]) -> Optional[Room]:
@@ -362,7 +374,8 @@ class RoomManager:
 
     def create(self, game_type: GameType, size: Optional[int] = None, mode: str = "pvp",
                host_name: str = "玩家", host_color: Color = BLACK,
-               ai_name: str = "AI·启发式", label: str = "", **rule_kwargs
+               ai_name: str = "AI·启发式", label: str = "",
+               time_control: Optional[TimeControl] = None, **rule_kwargs
                ) -> Tuple[Room, Seat]:
         """新建房间：房主落座；人机模式下 AI 自动坐上另一侧。"""
         if mode not in ("pvp", "pve"):
@@ -372,9 +385,12 @@ class RoomManager:
                 raise PlayError("房间数量已达上限")
             code = make_code(self.rooms)
             no = self._next_table_no()
+            eff_time = time_control if time_control is not None else self.time_control
+            if eff_time is None:
+                eff_time = self.tournament.default_time
             table = self.tournament.create_table(
                 no, game_type, size=size, black="黑方", white="白方",
-                label=label or f"对局 {code}")
+                label=label or f"对局 {code}", time_control=eff_time)
             room = Room(code=code, table=table, mode=mode)
             self.touch(room)
             self.rooms[code] = room
@@ -547,3 +563,41 @@ class RoomManager:
                 self.sweep_idle()
             except Exception:                          # pragma: no cover - 兜底
                 pass
+
+    def _ticker_loop(self) -> None:
+        """后台计时线程：定时检查每手/总用时，超时按犯规或判负处理。"""
+        while not self._stop.wait(self._tick_interval):
+            try:
+                self.tick_rooms()
+            except Exception:                          # pragma: no cover - 兜底
+                pass
+
+    def tick_rooms(self, now: Optional[float] = None) -> list:
+        """对所有进行中的房间做一次计时检查。
+
+        返回 ``[(对局码, PlayOutcome), ...]``：
+
+        * 总用时耗尽 -> 直接判负（记一条犯规，终局汇总可解释原因）
+        * 每手倒计时耗尽 -> 记一次犯规（累计两次由裁判判负）
+        """
+        results = []
+        with self._lock:
+            rooms = [r for r in self.rooms.values() if not r.closed]
+        for room in rooms:
+            if room.game_over:
+                continue
+            try:
+                outcome = room.referee.check_timeout()
+            except Exception:                      # pragma: no cover - 兜底
+                continue
+            if outcome is None:
+                continue
+            results.append((room.code, outcome))
+            try:
+                room.table.record_winrate()
+            except Exception:
+                pass
+            if room.game_over:
+                self._save_record(room, reason="game_over")
+            self._publish(room)
+        return results

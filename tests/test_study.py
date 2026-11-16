@@ -93,7 +93,33 @@ class QuizSessionTest(unittest.TestCase):
         self.assertGreaterEqual(d["wrong_count"], 1)
         self.assertEqual(d["last_winrate"], 0.30)
 
+    def test_free_play_places_wrong_stones(self):
+        # 缺陷回归：走错也要真的把子落在棋盘上，且能继续自由落子。
+        prob = get_problem("tsumego-p002")
+        s = QuizSession(problem=prob)
+        solver = s.solver_color
+        ch = "B" if solver is BLACK else "W"
+        wrongs = []
+        for y in range(prob["size"]):
+            for x in range(prob["size"]):
+                if (ch, x, y) in s._node.children:
+                    continue
+                if s._rules.is_legal(solver, x, y) is MoveResult.OK:
+                    wrongs.append((x, y))
+        self.assertGreaterEqual(len(wrongs), 2, "应至少有 2 个非正解合法点")
+        before = sum(1 for row in s._board_ints() for v in row if v == int(solver))
+        d = s.play(*wrongs[0])
+        after = sum(1 for row in d["board"] for v in row if v == int(solver))
+        self.assertEqual(after, before + 1)                 # 棋子真的落上去了
+        self.assertEqual(d["to_play"], solver.name)        # 对手停一手，仍轮到自己
+        self.assertFalse(d["solved"])
+        d2 = s.play(*wrongs[1])                             # 还能继续自由落子
+        after2 = sum(1 for row in d2["board"] for v in row if v == int(solver))
+        self.assertEqual(after2, before + 2)
+        self.assertEqual(d2["to_play"], solver.name)
+
     def test_play_after_finished_raises(self):
+
         prob = get_problem(BUILTIN_PROBLEMS[0]["id"])
         s = QuizSession(problem=prob)
         first = prob["lines"][0][0]

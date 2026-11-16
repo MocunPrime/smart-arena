@@ -29,10 +29,21 @@ OLED 屏幕联通。**当前阶段按约定先完成软件部分**，硬件（�
 
 ---
 
-## ISSUE-002：接入正式 KataGo 模型  —— `OPEN`
+## ISSUE-002：内置 KataGo 引擎  —— `DONE`（v1.4.0）
 
-当前默认使用**启发式评估**（保证无引擎可运行）。后续可接入 KataGo 模型获得正式形势判断，
-通过 `py run.py serve --engine <katago 路径>` 指定，无需改动其他代码。
+**已完成**：软件**内置 KataGo v1.18.1（CPU / Eigen 版）+ 小型网络**（`engine/`），
+并随 exe 一起打包，**开箱即用、无需手动指定路径**：
+
+* `arena/ai.py::discover_engine()` 自动定位内置引擎（源码运行在仓库 `engine/`，
+  exe 运行在解包目录 `sys._MEIPASS/engine`）；
+* `make_default_evaluator()` 优先使用内置引擎，启动失败才回退启发式；
+* 仍支持 `--engine <路径>` 或环境变量 `SMART_ARENA_ENGINE` 覆盖为自备引擎；
+* 内置网络为 `g170e-b10c128-s1141046784-d204142634.txt.gz`（体积小、CPU 也能跑）。
+
+**授权**：KataGo 本体与网络均为 **MIT** 许可（见 `engine/KataGo-LICENSE.txt` 与
+[`docs/ATTRIBUTION.md`](ATTRIBUTION.md)）。
+
+**后续**：如需更强棋力，替换 `engine/*.txt.gz` 为更大的网络即可（更慢）。
 
 ---
 
@@ -89,13 +100,14 @@ OLED 屏幕联通。**当前阶段按约定先完成软件部分**，硬件（�
 * 改卷页 `/study`、题库接口 `/api/study/problems`、做题接口 `/api/study/*` 已实现并通过测试；
 * 题库：**8 道**不同难度的经典死活/杀棋常型（`arena/study/problems.py`），全部由本项目
   自带求解器与规则引擎验证"按参考解答行棋可提目标白棋"；
-* 胜率：默认用**参考解答模型**（正解续着记 ≥90%，走错记 ~30%）估算，保证**无 KataGo、无外网**也能改卷；
+* 胜率：接入**内置 KataGo** 时由引擎 `kata-analyze` 给出**真实胜率**；无引擎时回退**参考解答模型**
+  （正解续着记 ≥90%，走错记 ~30%），保证**无引擎、无外网**也能改卷；
 * 判定：`QuizSession` 记录"连续做对"手数，达到本题关键手数 `streak_needed` 且目标被提即判 `solved`。
 
 **待办清单**：
 
-1. **接入 KataGo 真实胜率**：把 `StudyManager(evaluator=...)` 接上 `KataGoEvaluator`，
-   用引擎的 `kata-analyze` 逐步胜率替换参考解答模型（接口已预留，改一处即可）；
+1. ~~**接入 KataGo 真实胜率**~~ —— **已完成**：`StudyManager(evaluator=KataGoEvaluator)` 已接上
+   内置引擎 `kata-analyze` 的逐步胜率，改卷页会标注“KataGo 引擎”；
 2. **题库扩充**：当前 8 道为自研整理（避免使用授权不明的第三方习题集）；
    后续可引入**授权清晰（CC0 / MIT / 公有领域）**的真实题库，或继续自研扩充到更多难度；
 3. **难度与目标多样化**：除"杀棋提子"外，补充"做活 / 双活 / 官子"等题型。

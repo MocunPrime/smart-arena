@@ -23,6 +23,8 @@ def main():
         elif op == "genmove":
             respond("D4")
         elif op in ("kata-analyze", "genmove_analyze", "lz-analyze"):
+            # 与真实 KataGo 一致：先回一行 "=" 确认，再持续输出 info 分析
+            sys.stdout.write("=\n")
             sys.stdout.write("info move D4 visits 512 winrate 0.62 scoreMean 3.4 pv D4\n")
             sys.stdout.flush()
         elif op == "final_score":

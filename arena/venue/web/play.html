@@ -52,6 +52,12 @@
         <label>昵称
           <input id="f-name" maxlength="16" placeholder="你的名字">
         </label>
+        <label>每方总时限(秒)
+          <input id="f-total" type="number" min="0" step="30" value="0" placeholder="0 = 不限">
+        </label>
+        <label>每手限时(秒)
+          <input id="f-permove" type="number" min="0" step="5" value="0" placeholder="0 = 不限">
+        </label>
         <label class="btnrow">&nbsp;
           <button id="create-btn">创建房间</button>
         </label>

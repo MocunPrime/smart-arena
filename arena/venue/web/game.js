@@ -187,9 +187,54 @@ function update(v){
   drawBoard(v);
   renderJoin(v);
   renderToolbar(v);
+  renderClocks(v);
 
   if(v.game_over) showOverlay(v);
 }
+
+// ---------------------------------------------------------------- 计时
+let clockState = null;
+function fmtClock(sec){
+  if(sec === null || sec === undefined) return "不限";
+  sec = Math.max(0, sec);
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m + ":" + String(s).padStart(2, "0");
+}
+function renderClocks(v){
+  if(!v) return;
+  clockState = {
+    at: Date.now(),
+    tc: v.time_control || {},
+    clock: v.clock || null,
+    moveLeft: (v.move_clock === null || v.move_clock === undefined) ? null : v.move_clock,
+    toPlay: v.to_play,
+    over: !!v.game_over,
+  };
+  paintClocks();
+}
+function paintClocks(){
+  const st = clockState;
+  if(!st) return;
+  const dt = st.over ? 0 : (Date.now() - st.at) / 1000;
+  const tc = st.tc || {};
+  const total = (tc.total || 0) > 0;
+  const perMove = (tc.per_move || 0) > 0;
+  const clk = st.clock || {};
+  const bc = (clk.BLACK || 0) - (total && st.toPlay === "BLACK" ? dt : 0);
+  const wc = (clk.WHITE || 0) - (total && st.toPlay === "WHITE" ? dt : 0);
+  const mb = el("clkblack"), mw = el("clkwhite"), mm = el("clkmove");
+  if(mb){ mb.textContent = total ? fmtClock(bc) : "不限"; mb.className = "v sm" + (total && bc <= 10 ? " warnclock" : ""); }
+  if(mw){ mw.textContent = total ? fmtClock(wc) : "不限"; mw.className = "v sm" + (total && wc <= 10 ? " warnclock" : ""); }
+  if(mm){
+    if(perMove && st.moveLeft !== null){
+      const left = st.over ? st.moveLeft : st.moveLeft - dt;
+      mm.textContent = fmtClock(left);
+      mm.className = "v" + (left <= 10 ? " warnclock" : "");
+    } else { mm.textContent = "不限"; mm.className = "v"; }
+  }
+}
+setInterval(paintClocks, 250);
 
 function renderJoin(v){
   const panel = el('joinpanel');

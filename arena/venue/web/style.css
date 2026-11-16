@@ -189,3 +189,16 @@ button:disabled{opacity:.45;cursor:not-allowed}
   .hero{flex-direction:column;align-items:flex-start}
   .recordgrid-inner{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
 }
+
+/* 回放：胜率曲线 + 双方胜率条 */
+.wrcurve{display:block;width:100%;height:150px;border:1px solid var(--line);
+  border-radius:12px;background:#121a2b;cursor:crosshair}
+.wrbar{display:flex;height:14px;margin-top:12px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--line);background:var(--panel2)}
+.wrbar .seg{height:100%;transition:width .25s ease}
+.wrbar .seg.black{background:linear-gradient(90deg,#3a3f4b,#0b0d12)}
+.wrbar .seg.white{background:linear-gradient(90deg,#cfd6e4,#ffffff)}
+.warnclock { color: #ff5b5b !important; }
+.wrlabels{display:flex;justify-content:space-between;align-items:center;
+  margin-top:8px;font-size:13px;color:var(--muted)}
+.wrlabels b{color:var(--txt);font-variant-numeric:tabular-nums}

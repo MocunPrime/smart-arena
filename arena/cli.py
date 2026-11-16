@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from .ai import HeuristicEvaluator, make_evaluator
+from .ai import HeuristicEvaluator, make_default_evaluator, make_evaluator
 from .model import Color, GameType
 from .referee import TimeControl
 from .team import demo_side
@@ -16,9 +16,11 @@ from .venue.server import VenueServer, local_ip
 from .venue.qr import qr_ascii
 
 
-def build_demo_tournament(n_tables: int = 3, engine: str = None) -> Tournament:
-    ev = make_evaluator(engine) if engine else HeuristicEvaluator()
-    t = Tournament(default_time=TimeControl(total=0, per_move=0))
+def build_demo_tournament(n_tables: int = 3, engine: str = None,
+                          time_control: TimeControl = None,
+                          evaluator=None) -> Tournament:
+    ev = evaluator or (make_evaluator(engine) if engine else HeuristicEvaluator())
+    t = Tournament(default_time=time_control or TimeControl(total=0, per_move=0))
     specs = [
         (1, GameType.GO, 19, "围棋 A组"),
         (2, GameType.GOMOKU, 15, "五子棋 A组"),
@@ -67,8 +69,14 @@ def _autoplay(t: Tournament, interval: float = 1.2):
 
 def cmd_serve(args) -> int:
     # 本阶段主打"线上对弈"：默认不预置演示棋桌；需要观赛演示时传 --tables N。
-    tournament = (build_demo_tournament(args.tables, args.engine)
-                  if args.tables else Tournament())
+    time_control = TimeControl(
+        total=max(0.0, float(getattr(args, "time_total", 0) or 0)),
+        per_move=max(0.0, float(getattr(args, "time_per_move", 0) or 0)))
+    # 胜率/改卷引擎：显式 --engine 优先，否则自动使用**内置** KataGo，缺失即回退启发式
+    evaluator = make_evaluator(args.engine) if args.engine else make_default_evaluator()
+    tournament = (build_demo_tournament(args.tables, time_control=time_control,
+                                        evaluator=evaluator)
+                  if args.tables else Tournament(default_time=time_control))
     if args.teams:
         _attach_teams(tournament)
     idle_minutes = getattr(args, "idle_timeout", None)
@@ -76,7 +84,10 @@ def cmd_serve(args) -> int:
     venue = VenueServer(tournament, host=args.host, port=args.port,
                         advertised_host=args.advertised_host,
                         idle_timeout=idle_seconds,
-                        records_dir=getattr(args, "records_dir", None))
+                        records_dir=getattr(args, "records_dir", None),
+                        engine_path=getattr(args, "engine", None),
+                        evaluator=evaluator,
+                        time_control=time_control)
     if args.autoplay:
         _autoplay(tournament, args.interval)
     lobby = venue.base_url + "play"
@@ -84,10 +95,23 @@ def cmd_serve(args) -> int:
     print("  线上对弈已启动")
     print("  对弈大厅   :", lobby)
     print("  本机地址   :", f"http://127.0.0.1:{args.port}/play")
+    print("  胜率引擎   :", "KataGo（内置）"
+          if getattr(evaluator, "name", "") == "katago"
+          else "内置启发式（未随包提供 KataGo）")
     if tournament.tables:
         print("  演示棋桌   :", len(tournament.tables), "（智慧赛场见 ISSUE-004）")
     if venue.rooms.idle_timeout > 0:
         print("  空闲自动关闭:", int(venue.rooms.idle_timeout // 60), "分钟")
+    tc = time_control
+    if tc.is_timed:
+        parts = []
+        if tc.total > 0:
+            parts.append(f"每方总时限 {int(tc.total)} 秒")
+        if tc.per_move > 0:
+            parts.append(f"每手限时 {int(tc.per_move)} 秒")
+        print("  对局限时   :", "；".join(parts))
+    else:
+        print("  对局限时   : 不限（可在创建房间时按局设置）")
     print("  棋谱保存目录:", venue.rooms.records_dir)
     print("=" * 54)
     print("  扫码入口（手机连同一 WiFi 后访问）：")
@@ -171,6 +195,10 @@ def main(argv=None) -> int:
                    help="房间空闲自动关闭的分钟数（默认 30，0 表示不自动关闭）")
     s.add_argument("--records-dir", default=None,
                    help="棋谱保存目录（默认 exe 同级 / 仓库 records）")
+    s.add_argument("--time-total", type=float, default=0.0,
+                   help="每方总时限（秒，0=不限；创建房间时可覆写）")
+    s.add_argument("--time-per-move", type=float, default=0.0,
+                   help="每手限时（秒，0=不限；创建房间时可覆写）")
     s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser("demo", help="运行裁判/规则演示")

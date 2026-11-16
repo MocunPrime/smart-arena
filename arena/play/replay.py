@@ -2,6 +2,9 @@
 
 用于「棋谱回放」页面：把已保存的 SGF 逐手还原成棋盘快照，正确重现
 围棋的提子、五子棋的落子、翻转棋的翻面等，供前端按手播放 / 拖动进度。
+
+另提供 :func:`evaluate_replay`：对每一手给出双方胜率（接入 KataGo 时用
+引擎、否则用内置启发式），供回放页**实时显示双方胜率**。
 """
 from __future__ import annotations
 
@@ -113,12 +116,8 @@ def game_type_from_sgf(meta: Dict[str, str]) -> GameType:
     return _GM_TO_TYPE.get(str(meta.get("GM", "")).strip(), GameType.GO)
 
 
-def build_replay(name: str, records_dir: Optional[str] = None,
-                 include_frames: bool = True) -> Optional[dict]:
-    """按棋谱文件名重建对局，返回前端可直接渲染的数据；文件不存在返回 None。
-
-    ``include_frames`` 为 False 时只返回终局棋盘（用于列表页缩略图，体积更小）。
-    """
+def _load_playback(name: str, records_dir: Optional[str] = None):
+    """读取 SGF 并建好可逐步重放的空棋局；文件不存在返回 None。"""
     path = resolve_record_path(name, records_dir)
     if not path:
         return None
@@ -128,13 +127,30 @@ def build_replay(name: str, records_dir: Optional[str] = None,
     game_type = game_type_from_sgf(meta)
     size = _as_int(meta.get("SZ"), 0) or DEFAULT_SIZE.get(game_type, 19)
     rules = create_rules(game_type, size=size)
+    return meta, moves, game_type, size, rules
+
+
+def _apply(rules, color: Color, coord: Coord) -> None:
+    if coord is None:
+        rules.play_pass(color, enforce_turn=False)
+    else:
+        rules.play(color, coord[0], coord[1], enforce_turn=False)
+
+
+def build_replay(name: str, records_dir: Optional[str] = None,
+                 include_frames: bool = True) -> Optional[dict]:
+    """按棋谱文件名重建对局，返回前端可直接渲染的数据；文件不存在返回 None。
+
+    ``include_frames`` 为 False 时只返回终局棋盘（用于列表页缩略图，体积更小）。
+    """
+    loaded = _load_playback(name, records_dir)
+    if not loaded:
+        return None
+    meta, moves, game_type, size, rules = loaded
 
     frames: List[dict] = []
     for index, (color, coord) in enumerate(moves, 1):
-        if coord is None:
-            rules.play_pass(color, enforce_turn=False)
-        else:
-            rules.play(color, coord[0], coord[1], enforce_turn=False)
+        _apply(rules, color, coord)
         if include_frames:
             public = rules.to_public_dict()
             frames.append({
@@ -169,4 +185,41 @@ def build_replay(name: str, records_dir: Optional[str] = None,
     }
 
 
-__all__ = ["parse_sgf", "build_replay", "game_type_from_sgf"]
+def _point(index: int, res) -> dict:
+    black = max(0.0, min(1.0, float(getattr(res, "black_winrate", 0.5))))
+    return {"no": index, "black": round(black, 4), "white": round(1.0 - black, 4)}
+
+
+def evaluate_replay(name: str, records_dir: Optional[str] = None, evaluator=None,
+                    upto: Optional[int] = None, start: int = 0) -> Optional[dict]:
+    """对棋谱逐手评估胜率，返回胜率曲线（供回放页实时显示双方胜率）。
+
+    返回值 ``{"source", "total", "start", "points"}``：``points[i]`` 对应第 i 手
+    之后的局面（i=0 为空盘），每点为 ``{"no", "black", "white"}``。
+
+    ``start`` / ``upto`` 支持**增量**计算：只评估 ``[start, upto]`` 区间（但仍会完整
+    重放更早的手数以还原正确局面），便于前端分块拉取、服务端缓存。
+    """
+    if evaluator is None:
+        from ..ai import HeuristicEvaluator
+        evaluator = HeuristicEvaluator()
+    loaded = _load_playback(name, records_dir)
+    if not loaded:
+        return None
+    _meta, moves, _game_type, _size, rules = loaded
+    total = len(moves)
+    end = total if upto is None else max(0, min(total, int(upto)))
+    begin = max(0, min(int(start), end + 1))
+
+    points: List[dict] = []
+    for index in range(0, end + 1):
+        if index > 0:
+            _apply(rules, *moves[index - 1])
+        if index >= begin:
+            points.append(_point(index, evaluator.win_rate(rules)))
+
+    return {"source": getattr(evaluator, "name", "heuristic"),
+            "total": total, "start": begin, "points": points}
+
+
+__all__ = ["parse_sgf", "build_replay", "game_type_from_sgf", "evaluate_replay"]

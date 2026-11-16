@@ -8,7 +8,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from arena.ai import GtpClient, HeuristicEvaluator, make_evaluator  # noqa: E402
+from arena.ai import (GtpClient, HeuristicEvaluator, KataGoEvaluator,  # noqa: E402
+                      discover_engine, make_default_evaluator, make_evaluator)
 from arena.hardware import HardwareHub, MemoryDisplay, MockBoardLink, OledDisplay  # noqa: E402
 from arena.model import Color, GameType, Verdict  # noqa: E402
 from arena.referee import Referee, TimeControl  # noqa: E402
@@ -20,6 +21,19 @@ from arena.venue.server import VenueServer  # noqa: E402
 
 BLACK, WHITE = Color.BLACK, Color.WHITE
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class _Clock:
+    """可手动推进的假时钟（毫秒级确定性计时测试）。"""
+
+    def __init__(self, t=1000.0):
+        self.t = float(t)
+
+    def __call__(self):
+        return self.t
+
+    def tick(self, dt):
+        self.t += dt
 
 
 class RefereeTest(unittest.TestCase):
@@ -50,6 +64,35 @@ class RefereeTest(unittest.TestCase):
         out = ref.check_timeout()
         self.assertIsNotNone(out)
         self.assertEqual(ref.foul_count(BLACK), 1)
+
+    def test_per_move_timeout_is_a_foul(self):
+        clock = _Clock()
+        ref = Referee(create_rules(GameType.GO, 9),
+                      time_control=TimeControl(total=0, per_move=5), time_fn=clock)
+        clock.tick(6)
+        out = ref.check_timeout()
+        self.assertIsNotNone(out)
+        self.assertEqual(ref.foul_count(BLACK), 1)
+        self.assertFalse(ref.game_over)                 # 第一次只是警告
+        self.assertGreater(ref.move_time_left(), 0)     # 倒计时已重置
+
+    def test_total_time_exhaustion_loses(self):
+        clock = _Clock()
+        ref = Referee(create_rules(GameType.GO, 9),
+                      time_control=TimeControl(total=5, per_move=0), time_fn=clock)
+        clock.tick(6)
+        out = ref.check_timeout()
+        self.assertTrue(out.loss_by_foul)
+        self.assertTrue(ref.game_over)
+        self.assertIs(ref.verdict(), Verdict.WHITE_WIN)  # 黑方用时耗尽判负
+
+    def test_disabled_time_control_no_timeout(self):
+        clock = _Clock()
+        ref = Referee(create_rules(GameType.GO, 9),
+                      time_control=TimeControl(total=0, per_move=0), time_fn=clock)
+        clock.tick(99999)
+        self.assertIsNone(ref.check_timeout())
+        self.assertFalse(ref.game_over)
 
 
 class TeamVotingTest(unittest.TestCase):
@@ -230,6 +273,50 @@ class EngineTest(unittest.TestCase):
     def test_katago_falls_back_without_engine(self):
         ev = make_evaluator(None)     # 无引擎路径
         self.assertIsInstance(ev, HeuristicEvaluator)
+
+    def test_collect_skips_ack_and_streams_info(self):
+        # 回归：kata-analyze 先回 "=" 确认行，collect() 不能就此提前中断。
+        script = os.path.join(ROOT, "tools", "mock_gtp_engine.py")
+        client = GtpClient([sys.executable, script])
+        try:
+            client.start()
+            client.command("boardsize 9")
+            client.raw_send("kata-analyze interval 100 maxmoves 1")
+            lines = client.collect(1.2)
+        finally:
+            client.close()
+        self.assertTrue(any("winrate 0.62" in ln for ln in lines),
+                        "collect() 应跳过 '=' 确认行并读到 info 胜率行，实得: %r" % lines)
+        self.assertEqual(KataGoEvaluator._parse_winrate(lines, Color.BLACK), 0.62)
+
+    def test_parse_winrate_variants(self):
+        self.assertEqual(
+            KataGoEvaluator._parse_winrate(["info move D4 winrate 0.6123 pv D4"], Color.BLACK),
+            0.6123)
+        self.assertEqual(
+            KataGoEvaluator._parse_winrate(["info winrate=0.4"], Color.BLACK), 0.4)
+        self.assertIsNone(KataGoEvaluator._parse_winrate(["no winrate here"], Color.BLACK))
+
+    def test_discover_engine_points_at_real_files(self):
+        found = discover_engine()
+        if found is None:
+            self.skipTest("未随包提供 KataGo 引擎")
+        exe, cfg, net = found
+        self.assertTrue(os.path.isfile(exe), exe)
+        self.assertTrue(cfg is None or os.path.isfile(cfg), cfg)
+        self.assertIsNotNone(net, "内置引擎应带一个网络权重文件")
+
+    def test_make_default_evaluator_starts_engine(self):
+        ev = make_default_evaluator()
+        try:
+            if isinstance(ev, HeuristicEvaluator):      # 无内置引擎时跳过
+                self.skipTest("未随包提供 KataGo 引擎")
+            self.assertEqual(ev.name, "katago")
+            res = ev.win_rate(create_rules(GameType.GO, 9))
+            self.assertEqual(res.source, "katago")
+            self.assertAlmostEqual(res.black_winrate + res.white_winrate, 1.0, places=6)
+        finally:
+            ev.close()
 
 
 class HardwareTest(unittest.TestCase):

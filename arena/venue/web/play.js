@@ -58,7 +58,9 @@ el('create-btn').onclick = async () => {
     size: parseInt(el('f-size').value, 10) || null,
     mode: el('f-mode').value,
     color: el('f-color').value,
-    name: name
+    name: name,
+    time_total: parseInt((el('f-total') || {}).value, 10) || 0,
+    time_per_move: parseInt((el('f-permove') || {}).value, 10) || 0
   };
   hint('create-hint', '正在创建…');
   const btn = el('create-btn');

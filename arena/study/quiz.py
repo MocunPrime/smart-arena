@@ -98,6 +98,7 @@ class QuizSession:
     problem: dict
     threshold: float = 0.90
     streak_needed: int = 0        # 0 = 自动取本题正解的关键手数
+    evaluator: Optional[object] = None   # 传入 KataGo 评估器即用真实胜率改卷
     sid: str = field(default_factory=lambda: secrets.token_urlsafe(9))
 
     #: 渐进的做题线路（用于前端进程条）
@@ -150,26 +151,34 @@ class QuizSession:
 
     # ------------------------------------------------------------------ 落子
     def play(self, x: int, y: int) -> dict:
+        """人类落一手（**自由落子**）：合法即落子，再按参考解答判定是否踩中要点。
+
+        关键修复：走错时也会把棋子真正落在棋盘上（而不是"点了没反应"），
+        并让对手停一手把行棋权交还给做题者，方便继续自由探索。
+        """
         if self.finished or self.solved:
             raise QuizError("本题已结束，请重置后重做")
         if self._rules.to_play is not self._solver:
             # 正常流程下不会出现（对手着法由系统自动应）；保险起见自动应一手
             self._auto_reply()
+        if self._rules.to_play is not self._solver and not self._rules.game_over:
+            self._hand_back()      # 引擎无法应手时让对手停一手，保证始终能自由落子
         if not self._rules.in_bounds(int(x), int(y)):
             raise QuizError("落点越界")
         if self._rules.is_legal(self._solver, int(x), int(y)) is not MoveResult.OK:
-            return self._wrong(x, y, note="这一点不能落子")
+            return self._wrong(x, y, note="这一点不能落子", place=False)
         key = ("B" if self._solver is BLACK else "W", int(x), int(y))
         child = self._node.children.get(key)
         if child is None:
-            return self._wrong(x, y)
+            return self._wrong(x, y, place=True)          # 非正解：照样把子落在盘上
         return self._correct(x, y, child)
 
     def _correct(self, x: int, y: int, child: _Trie) -> dict:
         self._rules.play(self._solver, int(x), int(y))
         self._node = child
         self.streak += 1
-        self.last_winrate = round(min(0.99, 0.92 + 0.02 * self.streak), 2)
+        self.last_winrate = self._measure_winrate(
+            fallback=min(0.99, 0.92 + 0.02 * self.streak))
         self.history.append({"side": "human", "color": self._solver.name,
                              "x": int(x), "y": int(y), "winrate": self.last_winrate,
                              "correct": True})
@@ -185,16 +194,48 @@ class QuizSession:
                 self.message = "白棋已提，但仍需按正解走完关键手。"
         return self.to_dict()
 
-    def _wrong(self, x: int, y: int, note: str = "") -> dict:
+    def _wrong(self, x: int, y: int, note: str = "", place: bool = False) -> dict:
+        """判为"非正解"的一手。
+
+        ``place=True``（默认的自由落子）时把棋子真正落到棋盘上，并让对手停一手
+        把行棋权交还给做题者；``place=False`` 只用于非法落点（不落子）。
+        """
+        if place and self._rules.is_legal(self._solver, int(x), int(y)) is MoveResult.OK:
+            self._rules.play(self._solver, int(x), int(y))
         self.wrong_count += 1
         self.streak = 0
-        self.last_winrate = 0.30
+        self.last_winrate = self._measure_winrate(fallback=0.30)
         self.history.append({"side": "human", "color": self._solver.name,
-                             "x": int(x), "y": int(y), "winrate": 0.30,
-                             "correct": False})
-        self.message = (note or "这一步胜率只有约 30%，不是要点，再想想。")
+                             "x": int(x), "y": int(y), "winrate": self.last_winrate,
+                             "correct": False, "placed": bool(place)})
+        self.message = (note or f"这一步胜率只有约 {self.last_winrate:.0%}，不是要点。")
+        self.message += ("（已落子，可继续自由尝试）" if place else "")
         self.message += "（连续做对计数已清零）"
+        if place:
+            self._hand_back()
         return self.to_dict()
+
+    def _measure_winrate(self, fallback: float) -> float:
+        """人类落子后的胜率：接入引擎（KataGo）时取真实胜率，否则用参考解答模型估算。
+
+        注意：**始终**由参考解答（trie）判定对 / 错，胜率只作为「改卷分数」展示，
+        因此无引擎时题目依然可解、可判定。
+        """
+        ev = getattr(self, "evaluator", None)
+        if ev is None:
+            return round(float(fallback), 2)
+        try:
+            res = ev.win_rate(self._rules)
+        except Exception:
+            return round(float(fallback), 2)
+        wr = res.black_winrate if self._solver is BLACK else res.white_winrate
+        return round(max(0.0, min(1.0, float(wr))), 2)
+
+    def _hand_back(self) -> None:
+        """对手停一手，把行棋权交还给做题者（自由落子时继续探索用）。"""
+        if self._rules.to_play is self._solver or self._rules.game_over:
+            return
+        self._rules.play_pass(self._rules.to_play)
 
     def _auto_reply(self) -> None:
         """按参考解答自动替对手应一手（记进历史，不计入人类连对）。"""
@@ -240,7 +281,9 @@ class QuizSession:
             "last_winrate": self.last_winrate,
             "message": self.message,
             "history": list(self.history),
-            "winrate_source": "参考解答模型",
+            "winrate_source": ("KataGo 引擎"
+                               if getattr(self.evaluator, "name", "") == "katago"
+                               else "参考解答模型"),
         }
 
     def _board_ints(self) -> List[List[int]]:
@@ -271,7 +314,8 @@ class StudyManager:
                 for key in list(self._sessions)[: self._max // 2]:
                     self._sessions.pop(key, None)
             session = QuizSession(problem=prob, threshold=threshold,
-                                  streak_needed=streak_needed or 0)
+                                  streak_needed=streak_needed or 0,
+                                  evaluator=self._evaluator)
             self._sessions[session.sid] = session
         return session
 

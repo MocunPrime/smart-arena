@@ -50,6 +50,20 @@
     </div>
 
     <section class="panel">
+      <div class="panel-title">胜率曲线 <span class="muted" id="evalsrc">分析中…</span></div>
+      <canvas id="wrcurve" class="wrcurve" width="720" height="150"></canvas>
+      <div class="wrbar">
+        <div class="seg black" id="wr-black-bar"></div>
+        <div class="seg white" id="wr-white-bar"></div>
+      </div>
+      <div class="wrlabels">
+        <span>黑方 <b id="wr-black">--</b></span>
+        <span class="muted">当前局面胜率</span>
+        <span>白方 <b id="wr-white">--</b></span>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="panel-title">手数列表 <span class="muted">点击跳转到该手</span></div>
       <div class="movelist" id="movelist"></div>
     </section>

@@ -25,7 +25,7 @@
   便于后续把逻辑移植回 Java。
 - **成果形态**：一个**可运行的软件原型**，包含三层：
   1. **纯逻辑层**（规则 / 裁判 / 团队赛 / 赛程）—— 零外部依赖，可单元测试；
-  2. **AI 分析层** —— 优先接 KataGo（GTP），无引擎时自动降级为启发式评估；
+  2. **AI 分析层** —— **内置 KataGo**（随 exe / 仓库分发，开箱即用），无引擎时自动降级为启发式评估；
   3. **展示层** —— 标准库 HTTP + SSE：本阶段提供**线上对弈**（`/play` 大厅 + `/room/<code>` 对局页），
      智慧赛场观赛页（`/table/<n>`）已实现但暂缓启用（`VENUE_ENABLED=False`）。
 
@@ -41,7 +41,7 @@
 | 团队投票，队长/嘉宾权重更高、可调 | `team.Member.weight` / `is_captain` / `is_guest`，`demo_side()` 给队长 3.0、嘉宾 2.0 |
 | 限时投票，超时强制按最高票落 | `VotingSession.timeout_s` + `resolve()`，到点由 `forced_point()` 强制落子 |
 | 智慧赛场：家长扫码看实时胜率 | `venue.VenueServer`：`/` 大厅二维码、`/table/<n>` 实时棋盘、`/events` SSE |
-| 对接 KataGo（GTP） | `ai.GtpClient` + `KataGoEvaluator`，缺失时 `HeuristicEvaluator` 兜底 |
+| 对接 KataGo（GTP） | **内置 KataGo v1.18.1（CPU/Eigen）+ 小网络**，`arena.ai` 自动发现；缺失时 `HeuristicEvaluator` 兜底 |
 | 多棋种（不止围棋） | `rules` 注册表：`GoRules` / `GomokuRules` / `ReversiRules` |
 | 三种部署方案（树莓派 / PC+蓝牙 / WiFi 棋盘） | **暂缓** —— 仅预留接口，见 `docs/OPEN-ISSUES.md` ISSUE-001 |
 | 某方在对方某手后弃权、谁是第一个弃权的 | `Referee.pass_log` / `first_pass`；对局页"弃权记录"按钮可查询 |
@@ -80,7 +80,8 @@ biye/
 ├── tools/
 │   ├── mock_gtp_engine.py     # 模拟 GTP 引擎（测试/演示用）
 │   └── build_exe.ps1          # 打包脚本
-├── tests/                     # 单元测试（80 项，含对弈 / 改卷 / 棋谱回放）
+├── engine/                    # 内置 KataGo 引擎 + 小网络（自动发现，随包分发）
+├── tests/                     # 单元测试（97 项，含对弈 / 改卷 / 棋谱回放 / 引擎适配）
 ├── release/                   # 打包产物：SmartArena.exe
 └── docs/                      # 设计文档、需求映射表、开放问题、会议转写
 ```
@@ -88,7 +89,7 @@ biye/
 ## 四、快速开始
 
 ```powershell
-# 1) 运行自检（80 项单元测试）
+# 1) 运行自检（97 项单元测试）
 py run.py test
 
 # 2) 运行裁判 / 规则演示（含犯规与终局小结）
@@ -130,7 +131,8 @@ py run.py serve --tables 3 --teams --autoplay
 - 运行环境：**Python 3.8+**（推荐 3.13）。
 - 核心逻辑：**零外部依赖**（仅标准库）。
 - 二维码（可选）：`pip install segno`（未安装时 `/qr.svg`、`/qr.png` 返回空，其余功能不受影响）。
-- 围棋分析（可选）：KataGo 可执行文件，通过 `--engine` 指定；无引擎时自动使用启发式评估。
+- 围棋分析：**内置 KataGo**（`engine/`，随源码与 exe 分发），自动发现、无需配置；
+  仍可用 `--engine <路径>` 或环境变量 `SMART_ARENA_ENGINE` 覆盖为自备引擎；都没有时回退启发式评估。
 
 ```powershell
 py -m pip install -r requirements.txt
@@ -187,8 +189,8 @@ py -m pip install -r requirements.txt
   按"紧气提子 / 扑 / 倒扑 / 追杀 / 征子"等公共围棋理论整理成棋盘与参考解答线；
 - **判定**：每落一手给出本手"胜率"，**连续走对的关键手数达到本题要求**（且被围白棋被提）即判做对；
   走错一手胜率降到约 30%，连对计数清零，可"重做本题"；
-- **胜率来源**：默认使用**参考解答模型**（踩在正解续着上记 ≥90%，走错记 ~30%），
-  接口已为**接入 KataGo 真实胜率**预留（见 `docs/OPEN-ISSUES.md` ISSUE-005）。
+- **胜率来源**：接入**内置 KataGo** 时由引擎 `kata-analyze` 给出**真实胜率**（改卷页会标注
+  “KataGo 引擎”）；无引擎时回退**参考解答模型**（踩在正解续着上记 ≥90%，走错记 ~30%）。
 
 | 路径 | 说明 |
 | --- | --- |
@@ -221,7 +223,7 @@ py -m pip install -r requirements.txt
 
 ## 十、说明与后续
 
-- 本项目为**软件原型**：AI 默认启发式，接入 KataGo 后可获得正式形势判断。
+- 本项目为**软件原型**：已**内置 KataGo** 用于胜率 / 改卷；人机陪练 AI 仍为启发式（够用、极快）。
 - **智慧赛场（场馆观赛）暂缓启用**：把 `arena/venue/server.py` 的 `VENUE_ENABLED` 置为 `True` 即恢复，见 ISSUE-004。
 - 团队赛权重、阶段划分、限时秒数均可在 `team.py` / `demo_side()` 中调整。
 - **硬件（智慧棋盘）为后续工作**：软件侧已预留标准接口（`arena/hardware.py`），
@@ -232,7 +234,7 @@ py -m pip install -r requirements.txt
 ## 十一、打包为 exe（单文件）
 
 仓库根目录的 `SmartArena.spec` 已配置好打包，已构建的成品在 **`release\SmartArena.exe`**
-（Windows 64 位单文件，约 11 MB，无需安装 Python）。
+（Windows 64 位单文件，约 40 MB，**已内置 KataGo 引擎与网络**，无需安装 Python、无需另配引擎）。
 
 - **双击 `SmartArena.exe`**：自动启动**线上对弈**服务并打开浏览器（对弈大厅 `/play`）；
 - **带参数运行**：等价于命令行，例如 `SmartArena.exe serve --port 9000`。
@@ -244,6 +246,7 @@ py -m pip install -r requirements.txt -r requirements-build.txt
 py -m PyInstaller --noconfirm --clean --distpath release --workpath build SmartArena.spec
 ```
 
+`SmartArena.spec` 的 `datas` 已包含 `engine/`（KataGo 引擎 + 小网络），打包后单文件即可离线跑分析。
 也可以直接双击根目录的 `打包exe.bat`。
 
 > 提示：单文件版首次启动需解压到临时目录，约 2–5 秒；若被 Windows Defender / SmartScreen

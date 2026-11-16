@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .model import (
     Color,
@@ -52,6 +52,10 @@ class TimeControl:
     def to_dict(self) -> dict:
         return {"total": self.total, "per_move": self.per_move}
 
+    @property
+    def is_timed(self) -> bool:
+        return self.total > 0 or self.per_move > 0
+
 
 class Referee:
     def __init__(
@@ -61,6 +65,7 @@ class Referee:
         foul_limit: int = 2,
         time_control: Optional[TimeControl] = None,
         events_sink=None,
+        time_fn: Optional[Callable[[], float]] = None,
     ):
         self.rules = rules
         self.names = names or {BLACK: "黑方", WHITE: "白方"}
@@ -72,14 +77,16 @@ class Referee:
         self.pass_log: List[dict] = []
         self.resign_color: Optional[Color] = None
         self._final: Optional[Verdict] = None
-        self.started_at = time.time()
+        self._time_fn = time_fn or time.time
+        self.started_at = self._time_fn()
         self._events_sink = events_sink
 
         self.clock: Dict[Color, float] = {
             BLACK: self.time_control.total,
             WHITE: self.time_control.total,
         }
-        self._last_tick = time.time()
+        self._last_tick = self._time_fn()
+        self._turn_started = self._last_tick
 
     # ------------------------------------------------------------------ 事件
     def _emit(self, kind: str, payload: dict) -> None:
@@ -92,19 +99,38 @@ class Referee:
 
     # ------------------------------------------------------------------ 计时
     def tick(self) -> float:
-        now = time.time()
+        now = self._time_fn()
         elapsed = now - self._last_tick
         self._last_tick = now
+        if self.game_over:
+            return elapsed
         c = self.rules.to_play
         if self.time_control.total > 0:
             self.clock[c] = max(0.0, self.clock.get(c, 0.0) - elapsed)
         return elapsed
 
+    def move_time_left(self) -> Optional[float]:
+        """当前这一手的剩余时间；``per_move <= 0`` 表示不限时（返回 None）。"""
+        if self.time_control.per_move <= 0:
+            return None
+        return max(0.0, self.time_control.per_move - (self._time_fn() - self._turn_started))
+
+    def reset_move_clock(self) -> None:
+        """把"每手倒计时"重置到当前时刻（落子 / 换手时调用）。"""
+        self._turn_started = self._time_fn()
+
     def check_timeout(self) -> Optional[PlayOutcome]:
-        """返回超时犯规（若发生）。"""
+        """检查是否超时：总用时耗尽 = 直接判负；每手超时 = 记一次犯规。"""
         self.tick()
-        if self.time_control.total > 0 and self.clock.get(self.rules.to_play, 0.0) <= 0:
-            return self.foul(self.rules.to_play, FoulType.TIMEOUT, note="总用时耗尽")
+        if self.game_over:
+            return None
+        c = self.rules.to_play
+        if self.time_control.total > 0 and self.clock.get(c, 0.0) <= 0:
+            return self.lose_on_time(c, note="总用时耗尽")
+        if self.time_control.per_move > 0 and self.move_time_left() <= 0:
+            out = self.foul(c, FoulType.TIMEOUT, note="本手超时")
+            self.reset_move_clock()
+            return out
         return None
 
     # ------------------------------------------------------------------ 落子
@@ -112,12 +138,16 @@ class Referee:
              enforce_turn: bool = True) -> PlayOutcome:
         self.tick()
         result = self.rules.play(color, x, y, enforce_turn=enforce_turn)
-        return self._wrap(color, result, x, y)
+        outcome = self._wrap(color, result, x, y)
+        if outcome.accepted:
+            self.reset_move_clock()
+        return outcome
 
     def play_pass(self, color: Color) -> PlayOutcome:
         self.tick()
         result = self.rules.play_pass(color)
         if result is MoveResult.OK:
+            self.reset_move_clock()
             record = self._pass_record(color)
             self.pass_log.append(record)
             self.pass_order.append(color)
@@ -174,6 +204,20 @@ class Referee:
         return PlayOutcome(result=MoveResult.ILLEGAL, accepted=False,
                            foul=rec, loss_by_foul=loss)
 
+    def lose_on_time(self, color: Color, note: str = "") -> PlayOutcome:
+        """时间耗尽：直接判负（同时记一条犯规，便于终局汇总说明）。"""
+        rec = FoulRecord(color=color, foul_type=FoulType.TIMEOUT,
+                         move_no=len(self.rules.moves), note=note or "时间耗尽")
+        self.fouls.append(rec)
+        self._final = Verdict.WHITE_WIN if color is BLACK else Verdict.BLACK_WIN
+        self.rules.game_over = True
+        self._emit("foul", {"color": color.name, "type": FoulType.TIMEOUT.value,
+                            "count": self.foul_count(color), "limited": True, "note": rec.note})
+        self._emit("verdict", {"verdict": self._final.value, "reason": "timeout",
+                               "color": color.name})
+        return PlayOutcome(result=MoveResult.ILLEGAL, accepted=False, foul=rec,
+                           loss_by_foul=True)
+
     def foul_count(self, color: Color) -> int:
         return sum(1 for f in self.fouls if f.color is color)
 
@@ -222,6 +266,7 @@ class Referee:
         }
 
     def to_public_dict(self) -> dict:
+        mtl = self.move_time_left()
         return {
             **self.rules.to_public_dict(),
             "players": {c.name: self.names.get(c, c.name_cn) for c in (BLACK, WHITE)},
@@ -234,5 +279,7 @@ class Referee:
             "pass_log": [dict(r) for r in self.pass_log],
             "resigned": self.resign_color.name if self.resign_color else None,
             "clock": {c.name: round(self.clock.get(c, 0.0), 1) for c in (BLACK, WHITE)},
+            "time_control": self.time_control.to_dict(),
+            "move_clock": (round(mtl, 1) if mtl is not None else None),
             "game_over": self.game_over,
         }

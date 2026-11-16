@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import arena.venue.server as venue_server  # noqa: E402
 from arena.model import Color, GameType, Verdict  # noqa: E402
+from arena.referee import TimeControl  # noqa: E402
 from arena.play import PlayError, RoomManager, make_code, parse_color  # noqa: E402
 from arena.play.room import ALPHABET  # noqa: E402
 from arena.tournament import Tournament  # noqa: E402
@@ -133,6 +134,90 @@ class RoomTest(unittest.TestCase):
         self.assertGreaterEqual(len(room.referee.rules.moves), 2)
 
 
+class _RoomClock:
+    """可手动推进的假时钟。"""
+
+    def __init__(self, t=1000.0):
+        self.t = float(t)
+
+    def __call__(self):
+        return self.t
+
+    def tick(self, dt):
+        self.t += dt
+
+
+class TimeControlRoomTest(unittest.TestCase):
+    def _mgr(self, tc):
+        clock = _RoomClock()
+        t = Tournament(default_time=tc, time_fn=clock)
+        return RoomManager(t, auto_sweep=False), clock
+
+    def test_view_exposes_time_control(self):
+        mgr, _ = self._mgr(TimeControl(total=60, per_move=5))
+        room, seat = mgr.create(GameType.GO, size=9, host_color=BLACK)
+        v = mgr.view(room, seat.token)
+        self.assertEqual(v["time_control"]["total"], 60)
+        self.assertEqual(v["time_control"]["per_move"], 5)
+        self.assertIsNotNone(v["move_clock"])
+        self.assertAlmostEqual(v["move_clock"], 5, delta=0.5)
+
+    def test_per_move_timeout_is_a_foul(self):
+        mgr, clock = self._mgr(TimeControl(total=0, per_move=10))
+        room, _ = mgr.create(GameType.GO, size=9, host_color=BLACK)
+        clock.tick(11)
+        results = mgr.tick_rooms()
+        self.assertEqual(len(results), 1)
+        self.assertEqual(room.referee.foul_count(BLACK), 1)
+        self.assertFalse(room.game_over)          # 第一次只是警告
+
+    def test_two_per_move_timeouts_lose(self):
+        mgr, clock = self._mgr(TimeControl(total=0, per_move=10))
+        room, _ = mgr.create(GameType.GO, size=9, host_color=BLACK)
+        clock.tick(11); mgr.tick_rooms()
+        clock.tick(11); mgr.tick_rooms()
+        self.assertTrue(room.game_over)
+        self.assertIs(room.referee.verdict(), Verdict.WHITE_WIN)
+
+    def test_total_time_exhaustion_loses(self):
+        mgr, clock = self._mgr(TimeControl(total=10, per_move=0))
+        room, _ = mgr.create(GameType.GO, size=9, host_color=BLACK)
+        clock.tick(11)
+        mgr.tick_rooms()
+        self.assertTrue(room.game_over)
+        self.assertIs(room.referee.verdict(), Verdict.WHITE_WIN)
+
+    def test_disabled_time_control_never_ticks(self):
+        mgr, clock = self._mgr(TimeControl(total=0, per_move=0))
+        room, _ = mgr.create(GameType.GO, size=9, host_color=BLACK)
+        clock.tick(99999)
+        self.assertEqual(mgr.tick_rooms(), [])
+        self.assertFalse(room.game_over)
+
+    def test_room_time_control_overrides_tournament_default(self):
+        clock = _RoomClock()
+        t = Tournament(default_time=TimeControl(total=0, per_move=0), time_fn=clock)
+        mgr = RoomManager(t, auto_sweep=False)
+        room, seat = mgr.create(GameType.GO, size=9, host_color=BLACK,
+                                time_control=TimeControl(total=30, per_move=3))
+        v = mgr.view(room, seat.token)
+        self.assertEqual(v["time_control"]["total"], 30)
+        self.assertEqual(v["time_control"]["per_move"], 3)
+
+    def test_ticker_thread_actually_runs(self):
+        import time as _t
+        t = Tournament(default_time=TimeControl(total=0, per_move=0.3))
+        mgr = RoomManager(t, auto_sweep=True, tick_interval=0.2)
+        try:
+            room, _ = mgr.create(GameType.GO, size=9, host_color=BLACK)
+            deadline = _t.time() + 6
+            while _t.time() < deadline and not room.game_over:
+                _t.sleep(0.1)
+            self.assertTrue(room.game_over, "后台计时线程未触发超时判负")
+        finally:
+            mgr.shutdown()
+
+
 class PlayHttpTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -208,6 +293,19 @@ class PlayHttpTest(unittest.TestCase):
         st, body = self._get(f"/api/room/{code}")
         self.assertNotIn(token, body.decode("utf-8"))
         self.assertNotIn(tok2, body.decode("utf-8"))
+
+    def test_room_time_control_roundtrip(self):
+        st, d = self._post("/api/room/create",
+                           {"game_type": "go", "size": 9, "color": "BLACK",
+                            "name": "甲", "time_total": 120, "time_per_move": 15})
+        self.assertEqual(st, 201)
+        code = d["code"]
+        self.assertEqual(d["view"]["time_control"]["total"], 120)
+        self.assertEqual(d["view"]["time_control"]["per_move"], 15)
+        st, body = self._get(f"/api/room/{code}")
+        v = json.loads(body)
+        self.assertEqual(v["time_control"]["per_move"], 15)
+        self.assertIsNotNone(v["move_clock"])
 
     def test_move_errors_return_400(self):
         st, d = self._post("/api/room/create",

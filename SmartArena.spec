@@ -5,7 +5,9 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('arena/venue/web', 'arena/venue/web')],
+    # 内置 KataGo（引擎 + 小网络 + 配置）：单文件运行时解压到 sys._MEIPASS/engine，
+    # 由 arena.ai.discover_engine() 自动发现，无需用户手动指定。
+    datas=[('arena/venue/web', 'arena/venue/web'), ('engine', 'engine')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

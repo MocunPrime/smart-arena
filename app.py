@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -30,11 +31,17 @@ def _run_desktop(port: int = 8000) -> int:
     # 本阶段主打"线上对弈"：不再默认推演演示赛场（智慧赛场见 ISSUE-004）。
     tournament = Tournament()
 
-    venue = VenueServer(tournament, host="0.0.0.0", port=port)
+    # 胜率 / 改卷引擎：默认使用**随程序打包的内置 KataGo**；可用环境变量
+    # SMART_ARENA_ENGINE=KataGo 可执行文件路径 覆盖；若都不可用则回退内置启发式。
+    from arena.ai import make_default_evaluator, make_evaluator
+    env_engine = os.environ.get("SMART_ARENA_ENGINE")
+    evaluator = make_evaluator(env_engine) if env_engine else make_default_evaluator()
+
+    venue = VenueServer(tournament, host="0.0.0.0", port=port, evaluator=evaluator)
     try:
         venue.build()
     except OSError:                      # 端口被占用则改用随机端口
-        venue = VenueServer(tournament, host="0.0.0.0", port=0)
+        venue = VenueServer(tournament, host="0.0.0.0", port=0, evaluator=evaluator)
         venue.build()
 
     local_url = f"http://127.0.0.1:{venue.port}/play"
@@ -45,6 +52,8 @@ def _run_desktop(port: int = 8000) -> int:
     print("  局域网大厅 :", venue.base_url + "play")
     print("  玩法       : 创建房间 -> 记住 4 位对局码 -> 报给对手扫码或输入")
     print("  支持棋种   : 围棋 / 五子棋 / 翻转棋（人人对战、人机对战）")
+    print("  胜率引擎   :", "KataGo（内置）" if getattr(evaluator, "name", "") == "katago"
+          else "内置启发式（未随包提供 KataGo）")
     print("  死活题改卷 :", f"http://127.0.0.1:{venue.port}/study",
           "（人做死活题，软件按胜率改卷）")
     print(bar)

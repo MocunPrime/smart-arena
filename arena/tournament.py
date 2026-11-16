@@ -144,21 +144,27 @@ class Table:
 
 
 class Tournament:
-    def __init__(self, bus: Optional[EventBus] = None, default_time: Optional[TimeControl] = None):
+    def __init__(self, bus: Optional[EventBus] = None, default_time: Optional[TimeControl] = None,
+                 time_fn: Optional[Callable[[], float]] = None):
         self.bus = bus or EventBus()
         self.tables: Dict[int, Table] = {}
         self.default_time = default_time or TimeControl(total=0, per_move=0)
+        self._time_fn = time_fn or time.time
         self._lock = threading.Lock()
 
     def create_table(self, no: int, game_type: GameType, size: Optional[int] = None,
                      black: str = "黑方", white: str = "白方",
                      black_team: Optional[TeamSide] = None,
                      white_team: Optional[TeamSide] = None,
-                     label: str = "", evaluator=None, **rule_kwargs) -> Table:
+                     label: str = "", evaluator=None,
+                     time_control: Optional[TimeControl] = None,
+                     **rule_kwargs) -> Table:
         rules = create_rules(game_type, size, **rule_kwargs)
         ev = evaluator or make_evaluator()
+        eff_time = time_control if time_control is not None else self.default_time
         ref = Referee(rules, names={BLACK: black, WHITE: white},
-                      time_control=self.default_time, events_sink=self.bus.publish)
+                      time_control=eff_time, events_sink=self.bus.publish,
+                      time_fn=self._time_fn)
         ref.table_no = no
         table = Table(no=no, referee=ref, evaluator=ev, black_team=black_team,
                       white_team=white_team, label=label or f"{no}号桌")

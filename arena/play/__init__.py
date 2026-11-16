@@ -12,6 +12,7 @@
 """
 from .replay import (
     build_replay,
+    evaluate_replay,
     game_type_from_sgf,
     parse_sgf,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "room_to_sgf",
     "save_room_record",
     "build_replay",
+    "evaluate_replay",
     "parse_sgf",
     "game_type_from_sgf",
 ]

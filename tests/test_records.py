@@ -226,6 +226,24 @@ class RecordHttpTest(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertIn(b"<html", body.lower())
 
+    def test_record_eval_api(self):
+        code = self._make_closed_room()
+        st, body = self._get("/api/records")
+        rows = json.loads(body)["records"]
+        name = next(r["name"] for r in rows if r["code"] == code)
+        st, body = self._get("/api/records/%s/eval" % name)
+        self.assertEqual(st, 200)
+        d = json.loads(body)
+        self.assertIn(d["source"], ("heuristic", "katago"))
+        self.assertEqual(d["total"], 1)
+        self.assertTrue(d["points"])
+        self.assertEqual(d["points"][0]["no"], 0)
+        self.assertGreaterEqual(d["points"][-1]["black"], 0.0)
+        self.assertLessEqual(d["points"][-1]["black"], 1.0)
+        self.assertTrue(d["done"])                 # 内置评估瞬时完成
+        st, _ = self._get("/api/records/nope.sgf/eval", allow_error=True)
+        self.assertEqual(st, 404)                  # 缺省棋谱 -> 404
+
     def test_unknown_record_replay_404(self):
         st, _ = self._get("/api/records/nope.sgf/replay", allow_error=True)
         self.assertEqual(st, 404)

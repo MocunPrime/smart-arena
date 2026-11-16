@@ -49,7 +49,10 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from ..model import Color, GameType
-from ..play import PlayError, RoomManager, build_replay, close_reason_text, parse_color
+from ..ai import HeuristicEvaluator, make_evaluator
+from ..referee import TimeControl
+from ..play import (PlayError, RoomManager, build_replay, close_reason_text,
+                    evaluate_replay, parse_color)
 from ..study import QuizError, StudyManager
 from ..tournament import EventBus, Tournament
 from .qr import qr_png_data_uri, qr_svg
@@ -96,11 +99,35 @@ def local_ip() -> str:
         s.close()
 
 
+def _time_control_from(data: dict) -> Optional[TimeControl]:
+    """从创建房间的请求里解析计时设置；未提供任何字段时返回 None(用默认)。"""
+    if not data:
+        return None
+    keys = ("time_total", "time_per_move", "total", "per_move")
+    if not any(k in data for k in keys):
+        return None
+    def _num(*names):
+        for n in names:
+            v = data.get(n)
+            if v in (None, ""):
+                continue
+            try:
+                return max(0.0, float(v))
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+    return TimeControl(total=_num("time_total", "total"),
+                       per_move=_num("time_per_move", "per_move"))
+
+
 class VenueServer:
     def __init__(self, tournament: Tournament, host: str = "0.0.0.0", port: int = 8000,
                  advertised_host: Optional[str] = None,
                  idle_timeout: Optional[float] = None,
-                 records_dir: Optional[str] = None):
+                 records_dir: Optional[str] = None,
+                 engine_path: Optional[str] = None,
+                 evaluator=None,
+                 time_control: Optional[TimeControl] = None):
         self.tournament = tournament
         self.bus: EventBus = tournament.bus
         room_kwargs = {}
@@ -108,9 +135,21 @@ class VenueServer:
             room_kwargs["idle_timeout"] = idle_timeout
         if records_dir is not None:
             room_kwargs["records_dir"] = records_dir
+        room_kwargs["time_control"] = time_control
         # 线上对弈房间（默认空闲 30 分钟自动关闭，并自动保存棋谱）
         self.rooms = RoomManager(tournament, **room_kwargs)
-        self.study = StudyManager()                  # 死活题改卷会话
+        # 胜率分析器：优先用调用方注入的评估器（如内置 KataGo），
+        # 其次按 KataGo 路径构造，都没有时回退内置启发式（纯逻辑、瞬时）。
+        self.engine_path = engine_path
+        if evaluator is not None:
+            self.evaluator = evaluator
+        elif engine_path:
+            self.evaluator = make_evaluator(engine_path)
+        else:
+            self.evaluator = HeuristicEvaluator()
+        self.study = StudyManager(evaluator=self.evaluator)   # 死活题改卷会话
+        self._eval_cache: dict = {}                  # 棋谱名 -> {source,total,points}
+        self._eval_lock = threading.Lock()
         self.host = host
         self.port = port
         self.advertised_host = advertised_host
@@ -146,6 +185,10 @@ class VenueServer:
 
     def shutdown(self) -> None:
         self.rooms.shutdown()
+        try:
+            self.evaluator.close()
+        except Exception:
+            pass
         if self.httpd:
             self.httpd.shutdown()
             self.httpd.server_close()
@@ -212,6 +255,8 @@ def _make_handler(venue: "VenueServer"):
             if path == "/api/records":
                 limit = _as_int((qs.get("limit") or ["100"])[0]) or 100
                 return self._json(venue.rooms.records(limit=limit))
+            if path.startswith("/api/records/") and path.endswith("/eval"):
+                return self._api_record_eval(path, qs)
             if path.startswith("/api/records/") and path.endswith("/replay"):
                 return self._api_record_replay(path, qs)
             if path.startswith("/api/records/"):
@@ -378,6 +423,44 @@ def _make_handler(venue: "VenueServer"):
                 return self._json({"error": "棋谱不存在"}, 404)
             return self._json(data)
 
+        def _api_record_eval(self, path, qs):
+            """胜率曲线：回放页实时显示双方胜率。
+
+            ``?to=N`` 表示评估到第 N 手（缺省=全部）。服务端按棋谱名缓存并
+            增量计算：内置评估一次即可拿全，接入 KataGo 时前端可分块拉取。
+            """
+            name = path[len("/api/records/"):]
+            if name.endswith("/eval"):
+                name = name[: -len("/eval")]
+            name = name.strip("/")
+            if not name:
+                return self._json({"error": "缺少棋谱名"}, 400)
+            raw_to = (qs.get("to", [""])[0] or "").strip()
+            upto = int(raw_to) if raw_to.isdigit() else None
+            with venue._eval_lock:
+                cache = venue._eval_cache.get(name)
+                start = len(cache["points"]) if cache else 0
+                data = evaluate_replay(name, venue.rooms.records_dir,
+                                       evaluator=venue.evaluator, upto=upto, start=start)
+                if data is None:
+                    return self._json({"error": "棋谱不存在"}, 404)
+                if cache is None:
+                    cache = {"source": data["source"], "total": data["total"], "points": []}
+                    venue._eval_cache[name] = cache
+                    if len(venue._eval_cache) > 64:      # 简单上限，防长期运行膨胀
+                        for old in list(venue._eval_cache)[:-64]:
+                            venue._eval_cache.pop(old, None)
+                cache["points"].extend(data["points"])
+                cache["total"] = data["total"]
+                return self._json({
+                    "source": cache["source"],
+                    "total": cache["total"],
+                    "offset": data["start"],
+                    "evaluated": len(cache["points"]),
+                    "done": len(cache["points"]) >= cache["total"] + 1,
+                    "points": cache["points"],
+                })
+
         def _api_record_file(self, path):
             """按文件名下载棋谱（拒绝路径穿越）。"""
             name = path[len("/api/records/"):].strip("/")
@@ -407,6 +490,7 @@ def _make_handler(venue: "VenueServer"):
                     host_name=(data.get("name") or "玩家"),
                     host_color=host_color,
                     label=data.get("label", ""),
+                    time_control=_time_control_from(data),
                     **kwargs)
             except PlayError as exc:
                 return self._json({"error": str(exc)}, 400)
