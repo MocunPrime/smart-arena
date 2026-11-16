@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智慧赛场 · 大厅</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>智慧赛场 · 赛事大厅</h1>
+    <div class="sub">家长扫码进入 · 点桌号查看实时棋局与胜率</div>
+  </header>
+  <main>
+    <section class="join">
+      <img class="qr" src="{{QR_DATA_URI}}" alt="扫码进入">
+      <div class="join-info">
+        <p>手机连接赛场 WiFi 后访问：</p>
+        <p class="url">{{BASE_URL}}</p>
+        <p class="hint">当前共 <b>{{TABLE_COUNT}}</b> 桌在赛 · 数据仅在本场馆局域网内分发</p>
+      </div>
+    </section>
+    <section id="tables" class="grid">加载中…</section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

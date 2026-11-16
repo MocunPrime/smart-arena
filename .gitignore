@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 本地参考克隆（参考上游 Katayzy，不纳入本仓库）
+_katayzy/
+
+# 运行产物
+*.log
+save/
+user-data/

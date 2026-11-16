@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智慧赛场 · 棋桌</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">棋桌</h1>
+    <div class="sub"><a href="/" class="back">← 返回大厅</a>
+      <span id="status" class="badge">…</span></div>
+  </header>
+  <main>
+    <div class="boardwrap">
+      <canvas id="board" width="720" height="720"></canvas>
+      <div class="boardfoot" id="boardfoot">　</div>
+    </div>
+    <div class="stat">
+      <div class="cell"><div class="k">黑方胜率</div><div class="v" id="bwr">--</div></div>
+      <div class="cell"><div class="k">白方胜率</div><div class="v" id="wwr">--</div></div>
+      <div class="cell"><div class="k">手数 / 行棋</div><div class="v" id="mv">--</div></div>
+      <div class="cell"><div class="k">引擎 / 形势</div><div class="v sm" id="eng">--</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">胜率曲线 <span class="muted" id="curve-hint">黑方胜率 · 随手数变化</span></div>
+      <canvas id="curve" width="720" height="220"></canvas>
+    </div>
+
+    <section class="panel" id="votepanel" hidden>
+      <div class="panel-title">团队投票 <span class="muted" id="vote-phase"></span></div>
+      <div id="vote-count" class="countdown"></div>
+      <div id="vote-body"></div>
+      <div class="toolbar" id="vote-tools"></div>
+    </section>
+
+    <div class="fouls" id="fouls">暂无犯规</div>
+
+    <div class="toolbar" id="toolbar"></div>
+    <div class="hintbar" id="hint">点击棋盘可演示落子（正式版由实体棋盘 / 裁判端驱动）。</div>
+  </main>
+  <div class="overlay" id="overlay">
+    <div class="box">
+      <h2 id="ov-title">终局</h2>
+      <div id="ov-body" class="ov-body"></div>
+    </div>
+  </div>
+  <script src="/static/table.js"></script>
+</body>
+</html>
