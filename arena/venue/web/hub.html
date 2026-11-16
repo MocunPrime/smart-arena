@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智慧棋赛 · 首页</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>智慧棋赛 · 一体化平台</h1>
+    <div class="sub">
+      线上对弈 · 死活题改卷 · 棋谱存档与回放 · 智慧赛场（按会议阶段暂缓）
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="hero-text">
+        <h2>下棋、做题、看棋谱，都在这里</h2>
+        <p class="muted">同一局域网内即可对战，无需外网。对局结束或房间关闭时自动保存 SGF 棋谱，
+          可随时逐手回放复盘。</p>
+      </div>
+      <div class="hero-stats">
+        <div class="hstat"><div class="k">进行中 / 等待的对局</div><div class="v" id="st-rooms">&ndash;</div></div>
+        <div class="hstat"><div class="k">已保存棋谱</div><div class="v" id="st-records">&ndash;</div></div>
+      </div>
+    </section>
+
+    <section class="features">
+      <a class="feature" href="/play">
+        <div class="ficon">&#9822;</div>
+        <div class="ftitle">线上对弈</div>
+        <div class="fdesc">创建 / 加入房间，围棋 &middot; 五子棋 &middot; 翻转棋，人机或真人对战。</div>
+      </a>
+      <a class="feature" href="/study">
+        <div class="ficon">&#10003;</div>
+        <div class="ftitle">死活题改卷</div>
+        <div class="fdesc">人做死活题，软件按 AI 胜率改卷，连续走对即判做对。</div>
+      </a>
+      <a class="feature" href="/records">
+        <div class="ficon">&#9971;</div>
+        <div class="ftitle">棋谱存档 / 回放</div>
+        <div class="fdesc">自动保存的 SGF 棋谱，可按棋种浏览、搜索并逐手回放。</div>
+      </a>
+      <a class="feature disabled" href="/venue">
+        <div class="ficon">&#9638;</div>
+        <div class="ftitle">智慧赛场 <span class="badge">暂未启用</span></div>
+        <div class="fdesc">场观赛、多桌导播、扫码看棋（按会议阶段暂时关闭，见 OPEN-ISSUES）。</div>
+      </a>
+    </section>
+  </main>
+  <script src="/static/hub.js"></script>
+</body>
+</html>

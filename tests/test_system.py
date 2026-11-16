@@ -140,11 +140,19 @@ class TournamentVenueTest(unittest.TestCase):
         self.assertEqual(v["move_number"], 1)
 
     def test_index_has_qr(self):
-        st, body = self._get("/")
+        # 首页现为统一入口；智慧赛场大厅移到 /venue
+        st, body = self._get("/venue")
         self.assertEqual(st, 200)
         self.assertTrue(body.decode("utf-8").startswith("<!doctype html"))
         # 二维码应被渲染为 data URI
         self.assertIn(b"data:image/png;base64,", body)
+
+    def test_hub_is_landing(self):
+        st, body = self._get("/")
+        self.assertEqual(st, 200)
+        html = body.decode("utf-8")
+        self.assertIn('href="/play"', html)
+        self.assertIn('href="/records"', html)
 
     def test_qr_endpoints(self):
         st, png = self._get("/qr.png")

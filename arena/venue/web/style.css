@@ -113,3 +113,79 @@ button:disabled{opacity:.45;cursor:not-allowed}
   .join{flex-direction:column;align-items:flex-start}
   .big-code{font-size:26px;letter-spacing:4px}
 }
+/* ==================== 可视化：首页 / 棋谱存档 / 回放 ==================== */
+/* 首页 hero */
+.hero{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  background:linear-gradient(135deg,#1b2540,#141b2b);border:1px solid var(--line);
+  border-radius:16px;padding:20px;margin-bottom:18px}
+.hero-text h2{margin:0 0 6px;font-size:22px}
+.hero-stats{display:flex;gap:14px}
+.hstat{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+  padding:12px 16px;min-width:130px;text-align:center}
+.hstat .k{color:var(--muted);font-size:12px}
+.hstat .v{font-size:28px;font-weight:800;color:var(--accent);margin-top:4px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.feature{display:block;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:18px;text-decoration:none;color:inherit;transition:.15s}
+.feature:hover{border-color:var(--accent);transform:translateY(-1px)}
+.feature .ficon{font-size:30px;line-height:1}
+.feature .ftitle{font-size:17px;font-weight:700;margin:10px 0 6px;display:flex;gap:8px;align-items:center}
+.feature .fdesc{color:var(--muted);font-size:13px;line-height:1.5}
+.feature.disabled{opacity:.6}
+
+/* 链接按钮 */
+.btnlink{display:inline-block;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:10px;padding:8px 14px;font-size:14px;text-decoration:none}
+.btnlink:active{background:var(--accent)}
+
+/* 棋谱存档：筛选条 */
+.filterbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.chip{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
+  border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}
+.chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.searchinput{flex:1;min-width:180px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:10px;padding:9px 12px;font-size:14px}
+.searchinput:focus{outline:none;border-color:var(--accent)}
+
+/* 棋谱存档：卡片网格 */
+.recordgrid{margin-top:14px}
+.recordgrid-inner{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.reccard{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  overflow:hidden;transition:.15s}
+.reccard:hover{border-color:var(--accent)}
+.rec-main{display:block;text-decoration:none;color:inherit;padding:12px}
+.thumb{width:100%;height:auto;border-radius:10px;background:#e8c892;display:block}
+.recbody{margin-top:10px}
+.recrow{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.reccode{font-weight:800;color:var(--accent);letter-spacing:1px}
+.recplayers{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+.recmeta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:2px}
+.recmeta .res{color:var(--win);font-weight:600}
+.recdl{display:block;text-align:center;font-size:12px;color:var(--accent);text-decoration:none;
+  padding:8px;border-top:1px solid var(--line);background:#0d1421}
+
+/* 回放：控制条 / 进度 / 手数列表 */
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.controls button{min-width:44px}
+.controls button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.speed{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.speed select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:6px 8px}
+.scrubwrap{display:flex;align-items:center;gap:10px;margin-top:10px}
+.scrubwrap input[type=range]{flex:1;accent-color:var(--accent)}
+.movelist{display:flex;flex-wrap:wrap;gap:6px;max-height:240px;overflow:auto}
+.mv{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;padding:5px 9px;font-size:13px;cursor:pointer;color:var(--txt)}
+.mv.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.mvi{color:var(--muted);min-width:22px;text-align:right}
+.mv.active .mvi{color:#eaf1ff}
+.mvc{font-weight:700}
+.mvc.b{color:#c9d2e6}
+.mv.active .mvc.b{color:#fff}
+.mvc.w{color:#fff}
+.mvp{font-variant-numeric:tabular-nums}
+
+@media(max-width:720px){
+  .hero{flex-direction:column;align-items:flex-start}
+  .recordgrid-inner{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+}

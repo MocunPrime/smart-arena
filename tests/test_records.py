@@ -195,5 +195,72 @@ class RecordHttpTest(unittest.TestCase):
         self.assertIsNotNone(v.get("idle_remaining"))
 
 
+    # ---- 回放 / 页面（可视化） ----
+    def test_hub_and_records_pages(self):
+        for path in ("/", "/records"):
+            st, body = self._get(path)
+            self.assertEqual(st, 200)
+            self.assertIn(b"<html", body.lower())
+
+    def test_replay_api_and_page(self):
+        code = self._make_closed_room()
+        st, body = self._get("/api/records")
+        rows = json.loads(body)["records"]
+        name = next(r["name"] for r in rows if r["code"] == code)
+        # 逐手快照
+        st, body = self._get("/api/records/%s/replay" % name)
+        self.assertEqual(st, 200)
+        d = json.loads(body)
+        self.assertEqual(d["game_type"], "go")
+        self.assertEqual(d["move_count"], 1)
+        self.assertEqual(len(d["moves"]), 1)
+        self.assertEqual((d["moves"][0]["x"], d["moves"][0]["y"]), (4, 4))
+        self.assertEqual(d["final_board"][4][4], 1)
+        # 缩略图：不返回逐手
+        st, body = self._get("/api/records/%s/replay?frames=0" % name)
+        d2 = json.loads(body)
+        self.assertEqual(d2["moves"], [])
+        self.assertEqual(d2["final_board"][4][4], 1)
+        # 回放页面
+        st, body = self._get("/replay/%s" % name)
+        self.assertEqual(st, 200)
+        self.assertIn(b"<html", body.lower())
+
+    def test_unknown_record_replay_404(self):
+        st, _ = self._get("/api/records/nope.sgf/replay", allow_error=True)
+        self.assertEqual(st, 404)
+
+
+class ReplayParseTest(unittest.TestCase):
+    def test_parse_sgf_moves_and_meta(self):
+        from arena.play.replay import parse_sgf
+        sgf = "(;GM[1]SZ[9]PB[\u9ed1]PW[\u767d]RE[W+R]C[a\\]b];B[cc];W[dd];B[];W[])"
+        meta, moves = parse_sgf(sgf)
+        self.assertEqual(meta.get("SZ"), "9")
+        self.assertEqual(meta.get("RE"), "W+R")
+        self.assertEqual(meta.get("C"), "a]b")          # 转义正确还原
+        self.assertEqual([c for c, _ in moves], [BLACK, WHITE, BLACK, WHITE])
+        self.assertEqual(moves[0][1], (2, 2))
+        self.assertEqual(moves[1][1], (3, 3))
+        self.assertIsNone(moves[2][1])                   # 停一手
+
+    def test_build_replay_reconstructs_board(self):
+        from arena.play.replay import build_replay
+        d = tempfile.mkdtemp()
+        mgr = RoomManager(Tournament(), records_dir=d, auto_sweep=False)
+        room, seat = mgr.create(GameType.GO, size=9, host_name="\u7532")
+        _, ws = mgr.join(room.code, "\u4e59", "WHITE")
+        mgr.move(room.code, seat.token, 2, 2)
+        mgr.move(room.code, ws.token, 3, 3)
+        mgr.resign(room.code, seat.token)
+        name = os.path.basename(room.record_path)
+        rep = build_replay(name, d)
+        self.assertEqual(rep["move_count"], 2)
+        self.assertEqual(rep["final_board"][2][2], 1)    # 黑子
+        self.assertEqual(rep["final_board"][3][3], 2)    # 白子
+        self.assertEqual(rep["result"], "W+R")
+        self.assertIsNone(build_replay("missing.sgf", d))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

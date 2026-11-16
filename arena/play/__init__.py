@@ -10,6 +10,11 @@
 对弈页与智慧赛场观看页读取同一张 :class:`arena.tournament.Table`，
 因此家长扫码看到的，就是棋手正在下的那一盘（实时同步）。
 """
+from .replay import (
+    build_replay,
+    game_type_from_sgf,
+    parse_sgf,
+)
 from .record import (
     default_records_dir,
     find_record_for_code,
@@ -44,4 +49,7 @@ __all__ = [
     "resolve_record_path",
     "room_to_sgf",
     "save_room_record",
+    "build_replay",
+    "parse_sgf",
+    "game_type_from_sgf",
 ]

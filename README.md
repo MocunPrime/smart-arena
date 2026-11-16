@@ -76,11 +76,11 @@ biye/
 │   └── venue/
 │       ├── server.py          # 智慧赛场 HTTP + SSE 服务
 │       ├── qr.py              # 二维码（segno：SVG / PNG / 终端）
-│       └── web/               # 前端：对弈大厅、对局页、改卷页、单桌页、样式、脚本
+│       └── web/               # 前端：首页/对弈大厅、对局页、改卷页、棋谱存档与回放页、单桌页、样式、脚本
 ├── tools/
 │   ├── mock_gtp_engine.py     # 模拟 GTP 引擎（测试/演示用）
 │   └── build_exe.ps1          # 打包脚本
-├── tests/                     # 单元测试（63 项，含对弈 / 改卷）
+├── tests/                     # 单元测试（80 项，含对弈 / 改卷 / 棋谱回放）
 ├── release/                   # 打包产物：SmartArena.exe
 └── docs/                      # 设计文档、需求映射表、开放问题、会议转写
 ```
@@ -88,7 +88,7 @@ biye/
 ## 四、快速开始
 
 ```powershell
-# 1) 运行自检（74 项单元测试）
+# 1) 运行自检（80 项单元测试）
 py run.py test
 
 # 2) 运行裁判 / 规则演示（含犯规与终局小结）
@@ -152,6 +152,7 @@ py -m pip install -r requirements.txt
 - **棋谱存档**：**每一局都会自动保存为 SGF 棋谱**（终局、认输、双方停一手，以及房间关闭时都会保存，幂等不重复），
   存放在 exe 同级 / 仓库根目录的 `records/`（可用环境变量 `SMART_ARENA_RECORDS_DIR` 覆盖）；
   大厅**棋谱存档**区可列表与下载，终局 / 关闭弹窗也提供下载链接；
+- **棋谱回放（可视化）**：`/records` 棋谱存档页可按棋种筛选、搜索并显示**终局缩略图**；点开进入 `/replay/<name>` **逐手回放**（播放/暂停、拖动进度条、手数列表跳转、键盘 ←/→/空格）；回放由服务端用规则引擎重建每一手局面，会计算提子。
 - **房间空闲自动关闭**：房间内默认 **30 分钟**无人操作（无落子/停一手/认输）即自动关闭，
   关闭时自动保存棋谱并向在线页面推送“房间已关闭 + 下载棋谱”提示；空闲时间可配置。
 - 实时：走子通过 SSE 即时同步给对手与（启用后的）观赛页；房间关闭也会推送 `room_closed` 事件。
@@ -160,13 +161,17 @@ py -m pip install -r requirements.txt
 
 | 路径 | 说明 |
 | --- | --- |
+| `GET /` | 统一首页（可视化入口：对弈 / 改卷 / 棋谱 / 智慧赛场） |
 | `GET /play` | 对弈大厅：创建房间 / 按对局码加入 / 房间列表 |
+| `GET /records` | 棋谱存档页：列表、筛选、搜索、终局缩略图 |
+| `GET /replay/<name>` | 棋谱回放页：逐手播放 / 拖动进度 / 手数列表 |
 | `GET /room/<code>` | 对弈页：棋盘、落子、停一手、认输、终局汇总 |
 | `GET /api/rooms` | 房间列表（JSON） |
 | `GET /api/room/<code>?token=…` | 房间状态（带 token 时含“我是谁 / 能否走子”） |
 | `GET /api/records` | 棋谱存档列表（JSON） |
 | `GET /api/room/<code>/record` | 下载该房间最近保存的 SGF 棋谱 |
 | `GET /api/records/<name>` | 按文件名下载棋谱 |
+| `GET /api/records/<name>/replay` | 棋谱回放数据（逐手棋盘快照；`?frames=0` 只返回终局） |
 | `POST /api/room/create` | 创建房间，返回 4 位对局码 |
 | `POST /api/room/<code>/join` | 落座（执黑 / 执白 / 自动坐空位） |
 | `POST /api/room/<code>/move` | 落子 |

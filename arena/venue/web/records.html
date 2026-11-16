@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>棋谱存档 · 智慧棋赛</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>棋谱存档</h1>
+    <div class="sub">
+      <a href="/" class="back">&larr; 首页</a>
+      <a href="/play" class="back">对弈大厅</a>
+      <a href="/study" class="back">死活题改卷</a>
+      <span class="muted">每局结束 / 房间关闭时自动保存为 SGF</span>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <div class="panel-title">筛选与搜索 <span class="muted" id="rec-count"></span></div>
+      <div class="filterbar">
+        <button class="chip active" data-gt="">全部</button>
+        <button class="chip" data-gt="go">围棋</button>
+        <button class="chip" data-gt="gomoku">五子棋</button>
+        <button class="chip" data-gt="reversi">翻转棋</button>
+        <input id="q" class="searchinput" placeholder="搜索棋手 / 对局码 / 结果">
+      </div>
+    </section>
+
+    <section id="records" class="recordgrid">加载中…</section>
+  </main>
+  <script src="/static/board.js"></script>
+  <script src="/static/records.js"></script>
+</body>
+</html>

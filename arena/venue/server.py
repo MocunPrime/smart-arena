@@ -49,7 +49,7 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from ..model import Color, GameType
-from ..play import PlayError, RoomManager, close_reason_text, parse_color
+from ..play import PlayError, RoomManager, build_replay, close_reason_text, parse_color
 from ..study import QuizError, StudyManager
 from ..tournament import EventBus, Tournament
 from .qr import qr_png_data_uri, qr_svg
@@ -201,6 +201,10 @@ def _make_handler(venue: "VenueServer"):
             # -------------------------------------------------- 线上对弈（始终启用）
             if path == "/play":
                 return self._file("play.html")
+            if path == "/records":
+                return self._file("records.html")
+            if path.startswith("/replay/"):
+                return self._file("replay.html")
             if path.startswith("/room/"):
                 return self._file("game.html")
             if path == "/api/rooms":
@@ -208,6 +212,8 @@ def _make_handler(venue: "VenueServer"):
             if path == "/api/records":
                 limit = _as_int((qs.get("limit") or ["100"])[0]) or 100
                 return self._json(venue.rooms.records(limit=limit))
+            if path.startswith("/api/records/") and path.endswith("/replay"):
+                return self._api_record_replay(path, qs)
             if path.startswith("/api/records/"):
                 return self._api_record_file(path)
             if path.startswith("/api/room/") and path.endswith("/record"):
@@ -222,8 +228,11 @@ def _make_handler(venue: "VenueServer"):
             if path.startswith("/api/study/"):
                 return self._api_study_view(path)
             if path in ("/", "/index.html"):
-                # 智慧赛场关闭时，首页即对弈大厅
-                return self._file("index.html" if VENUE_ENABLED else "play.html")
+                return self._file("hub.html")
+            if path == "/venue":
+                if not VENUE_ENABLED:
+                    return self._venue_disabled()
+                return self._file("index.html")
             # ---------------------------------------- 智慧赛场（场馆观赛，暂时关闭）
             if path.startswith("/table/"):
                 if not VENUE_ENABLED:
@@ -356,6 +365,18 @@ def _make_handler(venue: "VenueServer"):
             if not fp:
                 return self._json({"error": "该对局暂无棋谱"}, 404)
             return self._send_sgf(fp)
+
+        def _api_record_replay(self, path, qs):
+            """回放一局棋谱：返回逐手棋盘快照（frames=0 只返回终局，供列表缩略图）。"""
+            name = path[len("/api/records/"):]
+            if name.endswith("/replay"):
+                name = name[: -len("/replay")]
+            name = name.strip("/")
+            frames = (qs.get("frames", ["1"])[0] or "1").lower() not in ("0", "false", "no")
+            data = build_replay(name, venue.rooms.records_dir, include_frames=frames)
+            if not data:
+                return self._json({"error": "棋谱不存在"}, 404)
+            return self._json(data)
 
         def _api_record_file(self, path):
             """按文件名下载棋谱（拒绝路径穿越）。"""

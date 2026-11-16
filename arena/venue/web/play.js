@@ -155,18 +155,29 @@ function fmtTime(ts){
 function gameCn(g){ return {go:'围棋', gomoku:'五子棋', reversi:'翻转棋'}[g] || '对局'; }
 
 function makeRecordCard(r){
+  const wrap = document.createElement('div');
+  wrap.className = 'reccard';
   const a = document.createElement('a');
-  a.className = 'card';
-  a.href = r.download_url || ('/api/records/' + encodeURIComponent(r.name));
-  a.setAttribute('download', r.name || '');
+  a.className = 'rec-main';
+  a.href = '/replay/' + encodeURIComponent(r.name);
+  a.title = '点击回放这局棋';
   a.innerHTML =
-    '<div class="no">' + (r.code || '----') + ' <span class="badge finished">' +
-      gameCn(r.game_type) + '</span></div>' +
-    '<div class="meta">' + (r.date || '') + ' · ' + fmtTime(r.modified) + '</div>' +
-    '<div class="players"><span>● ' + (r.black || '黑方') + '</span>' +
+    '<div class="recrow"><span class="reccode">' + (r.code || '----') + '</span>' +
+      '<span class="badge">' + gameCn(r.game_type) + '</span>' +
+      '<span class="muted">' + (r.size_label ? r.size_label + ' 路' : '') + '</span></div>' +
+    '<div class="recplayers"><span>● ' + (r.black || '黑方') + '</span>' +
       '<span>○ ' + (r.white || '白方') + '</span></div>' +
-    '<div class="meta">结果：' + (r.result || '-') + ' · 点击下载 SGF</div>';
-  return a;
+    '<div class="recmeta"><span>' + (r.date || '') + '</span>' +
+      '<span class="res">' + (r.result || '-') + '</span></div>' +
+    '<div class="muted">' + fmtTime(r.modified) + '</div>';
+  wrap.appendChild(a);
+  const dl = document.createElement('a');
+  dl.className = 'recdl';
+  dl.href = r.download_url || ('/api/records/' + encodeURIComponent(r.name));
+  dl.setAttribute('download', r.name || '');
+  dl.textContent = '下载 SGF';
+  wrap.appendChild(dl);
+  return wrap;
 }
 
 async function loadRecords(){

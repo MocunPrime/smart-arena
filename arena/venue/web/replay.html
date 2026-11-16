@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>棋谱回放 · 智慧棋赛</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">棋谱回放</h1>
+    <div class="sub">
+      <a href="/" class="back">&larr; 首页</a>
+      <a href="/records" class="back">棋谱存档</a>
+      <span class="badge" id="gt">--</span>
+      <span class="badge" id="res">--</span>
+      <span class="muted" id="movesub">--</span>
+    </div>
+  </header>
+  <main>
+    <div class="boardwrap">
+      <canvas id="board" width="720" height="720"></canvas>
+      <div class="boardfoot" id="foot">&nbsp;</div>
+    </div>
+
+    <div class="controls">
+      <button id="first" title="首手">&#9198;</button>
+      <button id="prev" title="上一手">&#9664;</button>
+      <button id="play" class="primary" title="自动播放">&#9654; 播放</button>
+      <button id="next" title="下一手">&#9654;|</button>
+      <button id="last" title="末手">&#9197;</button>
+      <label class="speed">速度
+        <select id="speed">
+          <option value="1200">慢</option>
+          <option value="700" selected>中</option>
+          <option value="320">快</option>
+        </select>
+      </label>
+    </div>
+    <div class="scrubwrap">
+      <input type="range" id="scrub" min="0" max="0" value="0" step="1">
+      <span class="muted" id="progress">0 / 0</span>
+    </div>
+
+    <div class="stat">
+      <div class="cell"><div class="k">黑方</div><div class="v sm" id="black">--</div></div>
+      <div class="cell"><div class="k">白方</div><div class="v sm" id="white">--</div></div>
+      <div class="cell"><div class="k">当前手</div><div class="v sm" id="cur">--</div></div>
+      <div class="cell"><div class="k">提子（黑 / 白）</div><div class="v sm" id="cap">--</div></div>
+    </div>
+
+    <section class="panel">
+      <div class="panel-title">手数列表 <span class="muted">点击跳转到该手</span></div>
+      <div class="movelist" id="movelist"></div>
+    </section>
+
+    <div class="toolbar">
+      <a class="btnlink" id="dl" href="#" download>下载 SGF 棋谱</a>
+      <span class="muted" id="comment"></span>
+    </div>
+  </main>
+  <script src="/static/board.js"></script>
+  <script src="/static/replay.js"></script>
+</body>
+</html>
