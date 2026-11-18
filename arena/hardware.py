@@ -13,6 +13,8 @@ import json
 import socket
 from typing import Dict, List, Optional
 
+from .hardware_log import HardwareLog
+
 
 # ---------------------------------------------------------------------- 显示设备
 class DisplayDevice:
@@ -207,3 +209,184 @@ class HardwareHub:
             except Exception:
                 pass
         return v
+
+# ---------------------------------------------------------------------- OLED（SSD1306）
+import threading as _threading
+
+from .oled import (Framebuffer, I2CTransport, OLEDError, RecordingTransport,
+                   SSD1306, SerialOledTransport, render_winrate_frame)
+
+
+class Ssd1306Display(MemoryDisplay):
+    """把胜率渲染到 SSD1306（0.91"/0.96"，128x32 或 128x64，I2C）。
+
+    与 :class:`OledDisplay`（纯文本 / 控制台）不同，本类**真正驱动硬件**：把房间视图
+    渲染成 1bpp 位图，再经 ``transport``（本机 I2C / 串口桥 / 录制）下发到屏幕。
+    任何硬件异常都会被吞掉并记录到 ``self.error``，绝不打断正在进行的对局。
+    """
+
+    def __init__(self, transport=None, width: int = 128, height: int = 32,
+                 address: int = 0x3C, auto_init: bool = True,
+                 log: Optional[HardwareLog] = None, log_spec: Optional[str] = None):
+        super().__init__()
+        self.transport = transport if transport is not None else RecordingTransport()
+        self.driver = SSD1306(self.transport, width=width, height=height, address=address)
+        self._lock = _threading.Lock()
+        self._log = log
+        self._log_spec = (log_spec or "").strip()
+        self._last_error: Optional[str] = None
+        self.error: Optional[str] = None
+        if self._log and self._log_spec:
+            self._log.connection_attempt(self._log_spec)
+        if auto_init:
+            self._safe(self.driver.init, event="connect")
+
+    def _safe(self, fn, event: str = "send") -> None:
+        try:
+            with self._lock:
+                fn()
+        except Exception as exc:            # 硬件缺失 / 通信异常：记录但不抛出
+            self.error = str(exc)
+            if self._log and self._log_spec:
+                if event == "connect":
+                    self._log.connection_error(self._log_spec, self.error)
+                elif event != "close" and self._last_error != self.error:
+                    self._log.send_error(self._log_spec, self.error)
+            self._last_error = self.error
+        else:
+            self.error = None
+            if self._log and self._log_spec:
+                if event == "connect":
+                    self._log.connection_ok(self._log_spec)
+                elif event != "close" and self._last_error:
+                    self._log.connection_recovered(self._log_spec)
+            self._last_error = None
+
+    @property
+    def log_path(self) -> str:
+        return self._log.path if self._log else ""
+
+    def show_frame(self, view: dict):
+        fb = render_winrate_frame(view, self.driver.width, self.driver.height)
+        self._safe(lambda: self.driver.display(fb), event="send")
+        return fb
+
+    def show(self, view: dict) -> None:
+        super().show(view)
+        self.show_frame(view)
+
+    def preview(self, view: dict) -> str:
+        return render_winrate_frame(view, self.driver.width, self.driver.height).to_ascii()
+
+    def close(self) -> None:
+        closer = getattr(self.transport, "close", None)
+        if closer:
+            self._safe(closer, event="close")
+        if self._log and self._log_spec:
+            self._log.disconnected(self._log_spec, "closed")
+
+
+def make_display(spec: Optional[str], width: int = 128, height: int = 32) -> DisplayDevice:
+    """按规格字符串创建显示设备（供 CLI / 桌面入口使用）。
+
+    * ``""`` / ``mock`` / ``none``      -> :class:`MemoryDisplay`（仅记录，测试用）
+    * ``console``                      -> :class:`ConsoleDisplay`（打印到终端）
+    * ``oled`` / ``text``              -> :class:`OledDisplay`（终端文本占位）
+    * ``i2c`` / ``i2c:1`` / ``i2c:1:0x3c`` -> SSD1306，本机 I2C（树莓派 / Linux）
+    * ``serial:COM5`` / ``serial:/dev/ttyUSB0`` -> SSD1306，经单片机桥（Windows 友好）
+
+    末尾可用 ``@128x64`` 指定分辨率，例如 ``i2c:1:0x3c@128x64``。
+    """
+    spec = (spec or "").strip()
+    if not spec or spec.lower() in ("mock", "none", "null"):
+        return MemoryDisplay()
+    body, _, geom = spec.partition("@")
+    if geom:
+        try:
+            w_str, h_str = geom.lower().split("x")
+            width, height = int(w_str), int(h_str)
+        except ValueError:
+            raise ValueError(f"无法解析分辨率：{geom}（示例 128x64）")
+    low = body.lower()
+    if low == "console":
+        return ConsoleDisplay()
+    if low in ("oled", "text"):
+        return OledDisplay()
+    if low.startswith("i2c"):
+        parts = body.split(":")
+        bus = int(parts[1]) if len(parts) > 1 and parts[1] else 1
+        addr = int(parts[2], 0) if len(parts) > 2 and parts[2] else 0x3C
+        return Ssd1306Display(I2CTransport(address=addr, bus=bus), width=width, height=height,
+                                     log=HardwareLog(), log_spec=spec)
+    if low.startswith("serial"):
+        if ":" not in body:
+            raise ValueError("serial 显示需指定串口，例如 serial:COM5")
+        port = body.split(":", 1)[1]
+        return Ssd1306Display(SerialOledTransport(port), width=width, height=height,
+                                     log=HardwareLog(), log_spec=spec)
+    raise ValueError(f"未知显示规格：{spec}")
+
+
+class DisplayPump:
+    """把赛事事件流“泵”到显示设备上（**事件驱动**，不额外轮询引擎）。
+
+    订阅 :class:`~arena.tournament.EventBus` 的 ``state`` / ``room_closed`` 事件：事件里
+    已经带好了本手胜率（房间里每手只算一次），所以这里不会额外调用 KataGo。可选
+    ``room_code`` 把屏幕钉在某一桌；缺省则显示最近活跃的对局。
+    """
+
+    def __init__(self, bus, display: DisplayDevice, room_code: Optional[str] = None):
+        self.bus = bus
+        self.display = display
+        self.room_code = (room_code or "").strip().upper() or None
+        self.last: Optional[dict] = None
+
+    def _on_event(self, event: dict) -> None:
+        if not isinstance(event, dict):
+            return
+        etype = event.get("type")
+        code = str(event.get("code") or "").upper()
+        if self.room_code and code != self.room_code:
+            return
+        if etype == "state":
+            view = dict(event.get("payload") or {})
+            if code:
+                view["code"] = code
+            self.last = view
+            self._show(view)
+        elif etype == "room_closed":
+            view = dict(self.last or {})
+            view.update({"code": code, "verdict": "draw", "game_over": True,
+                         "closed_reason": event.get("reason", "")})
+            self._show(view)
+
+    def _show(self, view: dict) -> None:
+        try:
+            self.display.show(view)
+        except Exception:
+            pass
+
+    def idle(self) -> None:
+        """待机画面：还没有任何对局数据时显示 50% / READY。"""
+        self._show({"black_winrate": 0.5, "move_number": 0, "verdict": "ongoing",
+                    "engine": ""})
+
+    def start(self) -> "DisplayPump":
+        self.idle()
+        subscribe = getattr(self.bus, "subscribe", None)
+        if subscribe:
+            subscribe(self._on_event)
+        return self
+
+    def stop(self) -> None:
+        unsubscribe = getattr(self.bus, "unsubscribe", None)
+        if unsubscribe:
+            try:
+                unsubscribe(self._on_event)
+            except Exception:
+                pass
+
+    def show_once(self, view: dict) -> dict:
+        """直接显示一次给定视图（CLI 预览 / 手动刷新用）。"""
+        self._show(view)
+        return view

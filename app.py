@@ -44,6 +44,26 @@ def _run_desktop(port: int = 8000) -> int:
         venue = VenueServer(tournament, host="0.0.0.0", port=0, evaluator=evaluator)
         venue.build()
 
+    display_spec = (os.environ.get("SMART_ARENA_DISPLAY") or "").strip()
+    display = None
+    display_pump = None
+    display_note = "未启用（设置 SMART_ARENA_DISPLAY 后启用，见 docs/OLED.md）"
+    display_log = ""
+    if display_spec:
+        try:
+            from arena.hardware import DisplayPump, make_display
+            display = make_display(display_spec)
+            display_log = getattr(display, "log_path", "")
+            display_pump = DisplayPump(
+                venue.bus, display,
+                os.environ.get("SMART_ARENA_DISPLAY_ROOM")).start()
+            err = getattr(display, "error", None)
+            display_note = display_spec if not err else f"{display_spec}（未就绪：{err}）"
+        except Exception as exc:
+            display = None
+            display_pump = None
+            display_note = f"未启用（{exc}）"
+
     local_url = f"http://127.0.0.1:{venue.port}/play"
     bar = "=" * 56
     print(bar)
@@ -52,6 +72,9 @@ def _run_desktop(port: int = 8000) -> int:
     print("  局域网大厅 :", venue.base_url + "play")
     print("  玩法       : 创建房间 -> 记住 4 位对局码 -> 报给对手扫码或输入")
     print("  支持棋种   : 围棋 / 五子棋 / 翻转棋（人人对战、人机对战）")
+    print("  外置显示   :", display_note)
+    if display_log:
+        print("  硬件日志   :", display_log)
     print("  胜率引擎   :", "KataGo（内置）" if getattr(evaluator, "name", "") == "katago"
           else "内置启发式（未随包提供 KataGo）")
     print("  死活题改卷 :", f"http://127.0.0.1:{venue.port}/study",
@@ -69,6 +92,15 @@ def _run_desktop(port: int = 8000) -> int:
     except KeyboardInterrupt:
         print("\n已停止。")
     finally:
+        if display_pump is not None:
+            display_pump.stop()
+        if display is not None:
+            closer = getattr(display, "close", None)
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass
         venue.shutdown()
     return 0
 

@@ -8,7 +8,7 @@ a = Analysis(
     # 内置 KataGo（引擎 + 小网络 + 配置）：单文件运行时解压到 sys._MEIPASS/engine，
     # 由 arena.ai.discover_engine() 自动发现，无需用户手动指定。
     datas=[('arena/venue/web', 'arena/venue/web'), ('engine', 'engine')],
-    hiddenimports=[],
+    hiddenimports=['serial', 'serial.tools', 'serial.tools.list_ports', 'serial.win32'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

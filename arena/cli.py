@@ -8,6 +8,7 @@ import threading
 import time
 
 from .ai import HeuristicEvaluator, make_default_evaluator, make_evaluator
+from .hardware import DisplayPump, make_display
 from .model import Color, GameType
 from .referee import TimeControl
 from .team import demo_side
@@ -88,6 +89,25 @@ def cmd_serve(args) -> int:
                         engine_path=getattr(args, "engine", None),
                         evaluator=evaluator,
                         time_control=time_control)
+    display = None
+    display_pump = None
+    display_note = "未启用"
+    display_log = ""
+    display_spec = getattr(args, "display", "") or ""
+    if display_spec:
+        try:
+            display = make_display(display_spec)
+            display_pump = DisplayPump(
+                venue.bus, display, getattr(args, "display_room", None)).start()
+            display_note = display_spec
+            display_log = getattr(display, "log_path", "")
+            err = getattr(display, "error", None)
+            if err:
+                display_note += f"（未就绪：{err}）"
+        except Exception as exc:
+            display = None
+            display_pump = None
+            display_note = f"未启用（{exc}）"
     if args.autoplay:
         _autoplay(tournament, args.interval)
     lobby = venue.base_url + "play"
@@ -95,6 +115,9 @@ def cmd_serve(args) -> int:
     print("  线上对弈已启动")
     print("  对弈大厅   :", lobby)
     print("  本机地址   :", f"http://127.0.0.1:{args.port}/play")
+    print("  外置显示   :", display_note)
+    if display_log:
+        print("  硬件日志   :", display_log)
     print("  胜率引擎   :", "KataGo（内置）"
           if getattr(evaluator, "name", "") == "katago"
           else "内置启发式（未随包提供 KataGo）")
@@ -124,9 +147,50 @@ def cmd_serve(args) -> int:
         venue.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止。")
+    finally:
+        if display_pump is not None:
+            display_pump.stop()
+        if display is not None:
+            closer = getattr(display, "close", None)
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass
         venue.shutdown()
     return 0
 
+
+def cmd_oled_preview(args) -> int:
+    """不启动对弈服务，直接渲染一帧并可发送到真实 OLED。"""
+    from .oled import demo_view, render_winrate_frame
+
+    view = demo_view(args.black, args.move, args.engine, args.verdict)
+    fb = render_winrate_frame(view, args.width, args.height)
+    spec = (getattr(args, "display", "") or "").strip()
+    if spec:
+        display = None
+        try:
+            display = make_display(spec)
+            display.show(view)
+            err = getattr(display, "error", None)
+            if err:
+                print(f"OLED 发送失败（{spec}）：{err}")
+                return 1
+            print(f"OLED 发送成功：{spec}")
+        except Exception as exc:
+            print(f"OLED 发送失败（{spec}）：{exc}")
+            return 1
+        finally:
+            closer = getattr(display, "close", None) if display is not None else None
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass
+    print(fb.to_ascii())
+    print(f"已渲染 {args.width}x{args.height}，黑方胜率 {view['black_winrate']*100:.1f}%")
+    return 0
 
 def _attach_teams(t: Tournament) -> None:
     for i, table in enumerate(sorted(t.tables.values(), key=lambda x: x.no)):
@@ -199,13 +263,27 @@ def main(argv=None) -> int:
                    help="每方总时限（秒，0=不限；创建房间时可覆写）")
     s.add_argument("--time-per-move", type=float, default=0.0,
                    help="每手限时（秒，0=不限；创建房间时可覆写）")
+    s.add_argument("--display", default="",
+                   help="外置显示规格：serial:COM5 / i2c:1:0x3c / console；见 docs/OLED.md")
+    s.add_argument("--display-room", default=None,
+                   help="固定显示某一个房间码；缺省显示最近活跃对局")
     s.set_defaults(func=cmd_serve)
-
     d = sub.add_parser("demo", help="运行裁判/规则演示")
     d.set_defaults(func=cmd_demo)
 
     t = sub.add_parser("test", help="运行自带单元测试")
     t.set_defaults(func=cmd_selftest)
+
+    o = sub.add_parser("oled-preview", help="渲染/发送一帧 OLED 胜率画面（不启动服务）")
+    o.add_argument("--display", default="",
+                   help="留空只打印 ASCII；也可用 serial:COM5 / i2c:1:0x3c")
+    o.add_argument("--width", type=int, default=128)
+    o.add_argument("--height", type=int, default=32, choices=(32, 64))
+    o.add_argument("--black", type=float, default=0.62, help="黑方示例胜率 0..1")
+    o.add_argument("--move", type=int, default=42, dest="move")
+    o.add_argument("--engine", default="katago")
+    o.add_argument("--verdict", default="ongoing")
+    o.set_defaults(func=cmd_oled_preview)
 
     args = p.parse_args(argv)
     if not getattr(args, "func", None):

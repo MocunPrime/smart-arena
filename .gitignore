@@ -10,6 +10,7 @@ venv/
 _katayzy/
 
 # 运行产物
+logs/
 *.log
 save/
 user-data/

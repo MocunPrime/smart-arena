@@ -14,7 +14,10 @@
 >   内置入门/初级/中级/高级多难度题库，见第七节。
 > * **智慧赛场（场馆观赛 / 多桌导播）暂缓启用**：代码与页面全部保留，由 `arena/venue/server.py`
 >   的 `VENUE_ENABLED` 统一控制，默认关闭，详见 [`docs/OPEN-ISSUES.md`](docs/OPEN-ISSUES.md) **ISSUE-004**。
-> * **智慧棋盘（硬件）部分暂缓**：仅在 `arena/hardware.py` 预留接口，见 **ISSUE-001**。
+> * **外置 OLED 胜率屏已接入**：支持 SSD1306 0.91/0.96 英寸（128x32/128x64），
+>   对弈时实时显示黑白胜率、手数与终局/弃权状态，见 [`docs/OLED.md`](docs/OLED.md)。
+> * **硬件连接日志**：只记录 OLED 连接、断连和通信异常，写入 `logs/hardware.log`，不会记录棋局过程。
+> * **实体棋盘硬件暂缓**：传感器落子链路仍保留接口，跟踪见 **ISSUE-001**。
 
 ---
 
@@ -43,7 +46,8 @@
 | 智慧赛场：家长扫码看实时胜率 | `venue.VenueServer`：`/` 大厅二维码、`/table/<n>` 实时棋盘、`/events` SSE |
 | 对接 KataGo（GTP） | **内置 KataGo v1.18.1（CPU/Eigen）+ 小网络**，`arena.ai` 自动发现；缺失时 `HeuristicEvaluator` 兜底 |
 | 多棋种（不止围棋） | `rules` 注册表：`GoRules` / `GomokuRules` / `ReversiRules` |
-| 三种部署方案（树莓派 / PC+蓝牙 / WiFi 棋盘） | **暂缓** —— 仅预留接口，见 `docs/OPEN-ISSUES.md` ISSUE-001 |
+| 外置 OLED 显示实时胜率 | **已完成** —— SSD1306 128x32/128x64，I2C / 串口桥，事件驱动刷新 |
+| 实体棋盘与三种部署实测 | **暂缓** —— 保留接口，见 `docs/OPEN-ISSUES.md` ISSUE-001 |
 | 某方在对方某手后弃权、谁是第一个弃权的 | `Referee.pass_log` / `first_pass`；对局页"弃权记录"按钮可查询 |
 | 改卷：人做死活题、连续几手胜率≥90% 判对 | `arena/study/`（`QuizSession` / `StudyManager`）+ `/study` 改卷页 |
 
@@ -55,7 +59,7 @@ biye/
 ├── app.py                     # 桌面入口：双击启动赛场并打开浏览器（exe 打包入口）
 ├── SmartArena.spec            # PyInstaller 打包配置
 ├── 打包exe.bat                # 一键重新打包
-├── requirements.txt           # 运行依赖（segno）
+├── requirements.txt           # 运行依赖（segno、pyserial）
 ├── requirements-build.txt     # 打包依赖（pyinstaller）
 ├── arena/
 │   ├── model.py               # 领域模型：Color / GameType / Move / FoulRecord / Verdict
@@ -69,8 +73,9 @@ biye/
 │   ├── team.py                # 团队赛：名册权重、分阶段上场、加权投票、超时强制
 │   ├── tournament.py          # 赛程/多桌管理：EventBus、Table、Tournament
 │   ├── ai.py                  # AI：GTP 客户端 + KataGo 适配 + 启发式兜底
-│   ├── hardware.py            # 硬件接口（预留，暂缓实现，见 OPEN-ISSUES ISSUE-001）
-│   ├── cli.py                 # 命令行：serve / demo / test
+│   ├── hardware.py            # 硬件接入：显示设备、棋盘链路、事件刷新泵
+│   ├── oled.py                # SSD1306 驱动、胜率位图渲染、I2C/串口传输
+│   ├── cli.py                 # 命令行：serve / demo / test / oled-preview
 │   ├── play/                  # 线上对弈：房间 / 对局码 / 座位 / 启发式 AI 陪练
 │   ├── study/                 # 死活题改卷：题库 / 做题会话 / 连对判定
 │   └── venue/
@@ -79,17 +84,18 @@ biye/
 │       └── web/               # 前端：首页/对弈大厅、对局页、改卷页、棋谱存档与回放页、单桌页、样式、脚本
 ├── tools/
 │   ├── mock_gtp_engine.py     # 模拟 GTP 引擎（测试/演示用）
+│   ├── ssd1306_bridge/        # OLED 串口桥 Arduino/ESP 固件
 │   └── build_exe.ps1          # 打包脚本
 ├── engine/                    # 内置 KataGo 引擎 + 小网络（自动发现，随包分发）
-├── tests/                     # 单元测试（97 项，含对弈 / 改卷 / 棋谱回放 / 引擎适配）
+├── tests/                     # 单元测试（126 项，含对弈 / 改卷 / 棋谱回放 / OLED / 硬件日志 / 引擎适配）
 ├── release/                   # 打包产物：SmartArena.exe
-└── docs/                      # 设计文档、需求映射表、开放问题、会议转写
+└── docs/                      # 设计文档、需求映射表、OLED 接入、开放问题、会议转写
 ```
 
 ## 四、快速开始
 
 ```powershell
-# 1) 运行自检（97 项单元测试）
+# 1) 运行自检（125 项单元测试）
 py run.py test
 
 # 2) 运行裁判 / 规则演示（含犯规与终局小结）
@@ -98,7 +104,13 @@ py run.py demo
 # 3) 启动线上对弈（本阶段主功能）；浏览器打开 http://127.0.0.1:8000/play
 py run.py serve
 
-# 4) 需要观赛演示时，再预置棋桌（智慧赛场当前默认停用，见 ISSUE-004）
+# 4) 外置 OLED 画面预览（不接硬件；详见 docs/OLED.md）
+py run.py oled-preview
+
+# 5) 接上 SSD1306 后，通过串口桥显示实时胜率
+py run.py serve --display serial:COM5
+
+# 6) 需要观赛演示时，再预置棋桌（智慧赛场当前默认停用，见 ISSUE-004）
 py run.py serve --tables 3 --teams --autoplay
 ```
 
@@ -125,6 +137,23 @@ py run.py serve --tables 3 --teams --autoplay
 | `--autoplay` | 自动推演（演示用，主力为启发式） |
 | `--teams` | 为每桌挂载团队赛名册 |
 | `--interval` | 自动推演每一步的间隔秒数（默认 1.2） |
+| `--display` | 外置显示器：`serial:COM5` / `i2c:1:0x3c` / `console`；128x64 加 `@128x64` |
+| `--display-room` | 只显示指定 4 位房间码；缺省显示最近活跃房间 |
+
+### 外置 SSD1306 OLED 胜率屏
+
+对接 **SSD1306 0.91 英寸 128x32 OLED** 时，先把
+[`tools/ssd1306_bridge/ssd1306_bridge.ino`](tools/ssd1306_bridge/ssd1306_bridge.ino)
+烧录到 Arduino/ESP 开发板，再运行：
+
+```powershell
+py -m pip install pyserial
+py run.py oled-preview --display serial:COM5
+py run.py serve --display serial:COM5
+```
+
+树莓派可直接使用 I2C：`py run.py serve --display i2c:1:0x3c`。
+接线、128x64 参数、环境变量和排障说明见 **[`docs/OLED.md`](docs/OLED.md)**。
 
 ## 五、依赖
 
@@ -133,6 +162,7 @@ py run.py serve --tables 3 --teams --autoplay
 - 二维码（可选）：`pip install segno`（未安装时 `/qr.svg`、`/qr.png` 返回空，其余功能不受影响）。
 - 围棋分析：**内置 KataGo**（`engine/`，随源码与 exe 分发），自动发现、无需配置；
   仍可用 `--engine <路径>` 或环境变量 `SMART_ARENA_ENGINE` 覆盖为自备引擎；都没有时回退启发式评估。
+- 外置 OLED：树莓派 I2C 需 `smbus2`；Windows 串口桥需 `pyserial`。未安装时仅显示功能不可用，不影响对弈。
 
 ```powershell
 py -m pip install -r requirements.txt
@@ -219,6 +249,7 @@ py -m pip install -r requirements.txt
 - 详细设计：`docs/设计文档.md`
 - 会议需求映射：`docs/需求映射表.md`
 - **开放问题（含智慧棋盘硬件）**：`docs/OPEN-ISSUES.md`
+- **外置 OLED 接入**：`docs/OLED.md`
 - 会议原始转写：`docs/会议记录-原始转写.txt`
 
 ## 十、说明与后续
@@ -226,8 +257,8 @@ py -m pip install -r requirements.txt
 - 本项目为**软件原型**：已**内置 KataGo** 用于胜率 / 改卷；人机陪练 AI 仍为启发式（够用、极快）。
 - **智慧赛场（场馆观赛）暂缓启用**：把 `arena/venue/server.py` 的 `VENUE_ENABLED` 置为 `True` 即恢复，见 ISSUE-004。
 - 团队赛权重、阶段划分、限时秒数均可在 `team.py` / `demo_side()` 中调整。
-- **硬件（智慧棋盘）为后续工作**：软件侧已预留标准接口（`arena/hardware.py`），
-  待与硬件方案确认后接入，跟踪见 [`docs/OPEN-ISSUES.md`](docs/OPEN-ISSUES.md) **ISSUE-001**。
+- **外置 OLED 胜率屏已完成**：SSD1306 128x32/128x64，支持 I2C 与串口桥，见 [`docs/OLED.md`](docs/OLED.md)。
+- **实体棋盘（传感器/落子识别）仍为后续工作**：接口保留在 `arena/hardware.py`，跟踪见 [`docs/OPEN-ISSUES.md`](docs/OPEN-ISSUES.md) **ISSUE-001**。
 
 ---
 
@@ -237,7 +268,7 @@ py -m pip install -r requirements.txt
 （Windows 64 位单文件，约 40 MB，**已内置 KataGo 引擎与网络**，无需安装 Python、无需另配引擎）。
 
 - **双击 `SmartArena.exe`**：自动启动**线上对弈**服务并打开浏览器（对弈大厅 `/play`）；
-- **带参数运行**：等价于命令行，例如 `SmartArena.exe serve --port 9000`。
+- **带参数运行**：等价于命令行，例如 `SmartArena.exe serve --port 9000` 或 `SmartArena.exe serve --display serial:COM5`。
 
 重新打包：
 
